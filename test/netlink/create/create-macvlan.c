@@ -9,8 +9,31 @@
 
 #include <linux/netlink.h>
 
-static int
-ifup(char *name)
+static
+char* itoa(int num)
+{
+	int count = 1;
+	int n = num;
+
+	while(n > 10) {n = n / 10; count++;}
+
+	char *str = malloc(count + 1);
+
+	str[count] = '\0';
+
+	n = num;
+
+	for(int i = count-1; i >= 0; i--) {
+		str[i] =  (n % 10) + '0';
+		n = n / 10;
+	}
+
+	return str;
+}
+
+
+static
+int ifup(char *name)
 {
 	int fd;
 	struct ifreq ifr;
@@ -42,6 +65,7 @@ main(int argc, char *argv[])
 	struct nl_cache *link_cache;
 	struct nl_sock *sock;
 	int i, err, master_index;
+	char ifname[16] = "";
 
 	sock = nl_socket_alloc();
 	if ((err = nl_connect(sock, NETLINK_ROUTE)) < 0) {
@@ -66,7 +90,9 @@ main(int argc, char *argv[])
 		rtnl_link_macvlan_set_mode(link,
 				   rtnl_link_macvlan_str2mode("private"));
 
-		rtnl_link_set_name(link, "vif%d");
+		// construct interface name
+		sprintf(ifname, "vif%s", itoa(i));
+		rtnl_link_set_name(link, ifname);
 		if ((err = rtnl_link_add(sock, link, NLM_F_CREATE)) < 0) {
 			nl_perror(err, "Unable to add link");
 			return err;
