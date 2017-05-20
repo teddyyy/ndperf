@@ -1,26 +1,15 @@
 #include <netlink/netlink.h>
 #include <netlink/route/link.h>
 
-static
-char* itoa(int num)
+static void
+create_virtual_interface_name(char *ifname, int ifname_len, int num)
 {
-        int count = 1;
-        int n = num;
+        char ifindex[4] = "";
 
-        while(n > 10) {n = n / 10; count++;}
+        snprintf(ifindex, sizeof(ifindex), "%d", num);
+        snprintf(ifname, ifname_len, "vif%s", ifindex);
 
-        char *str = malloc(count + 1);
-
-        str[count] = '\0';
-
-        n = num;
-
-        for(int i = count-1; i >= 0; i--) {
-                str[i] =  (n % 10) + '0';
-                n = n / 10;
-        }
-
-        return str;
+        return;
 }
 
 int
@@ -28,8 +17,15 @@ main(int argc, char *argv[])
 {
 	struct rtnl_link *link;
 	struct nl_sock *sock;
-	int i, err;
-	char ifname[16] = "";
+	int i, ifnum, err;
+	char ifname[8] = "";
+
+	if (argc != 2) {
+		fprintf(stderr, "./delete-macvlan <interface num>\n");
+		return -1;
+	}
+
+	ifnum = atoi(argv[1]);
 
 	sock = nl_socket_alloc();
 	if ((err = nl_connect(sock, NETLINK_ROUTE)) < 0) {
@@ -37,10 +33,12 @@ main(int argc, char *argv[])
 		return err;
 	}
 
-	for (i = 0; i < 3; i++) {
+	for (i = 1; i <= ifnum; i++) {
 		link = rtnl_link_alloc();
 
-		sprintf(ifname, "vif%s", itoa(i));
+		// construct interface name
+                create_virtual_interface_name(ifname, sizeof(ifname), i);
+
 		rtnl_link_set_name(link, ifname);
 
 		if ((err = rtnl_link_delete(sock, link)) < 0) {

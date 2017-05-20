@@ -18,28 +18,6 @@ struct in6_ifreq
 };
 
 static
-char* itoa(int num)
-{
-	int count = 1;
-	int n = num;
-
-	while (n > 10) {n = n / 10; count++;}
-
-	char *str = malloc(count + 1);
-
-	str[count] = '\0';
-
-	n = num;
-
-	for (int i = count-1; i >= 0; i--) {
-		str[i] =  (n % 10) + '0';
-		n = n / 10;
-	}
-
-	return str;
-}
-
-static
 int set_ip6addr(char *name, char *ip6addr, int prefixlen)
 {
 	int fd;
@@ -92,15 +70,47 @@ int ifup(char *name)
 	return 0;
 }
 
+static void
+create_virtual_interface_name(char *ifname, int ifname_len, int num)
+{
+	char ifindex[4] = "";
+
+	snprintf(ifindex, sizeof(ifindex), "%d", num);
+	snprintf(ifname, ifname_len, "vif%s", ifindex);
+
+	return;
+}
+
+static void
+create_string_ipv6addr(char *ipv6addr, int addr_len, int num)
+{
+	char endaddr[8] = "";
+
+	//Since .1 addr is used by DUT.
+	num++;
+
+	snprintf(endaddr, sizeof(endaddr), "%d", num);
+	snprintf(ipv6addr, addr_len, "2001:2:0:1::%s", endaddr);
+
+	return;
+}
+
 int
 main(int argc, char *argv[])
 {
 	struct rtnl_link *link;
 	struct nl_cache *link_cache;
 	struct nl_sock *sock;
-	int i, n, err, master_index;
-	char ifname[16] = "";
-	char addr[48] = "";
+	int i, ifnum, err, master_index;
+	char ifname[8] = "";
+	char ipv6addr[48] = "";
+
+	if (argc != 2) {
+                fprintf(stderr, "./create-macvlan <interface num>\n");
+                return -1;
+        }
+
+        ifnum = atoi(argv[1]);
 
 	sock = nl_socket_alloc();
 	if ((err = nl_connect(sock, NETLINK_ROUTE)) < 0) {
@@ -113,12 +123,12 @@ main(int argc, char *argv[])
 		return err;
 	}
 
-	if (!(master_index = rtnl_link_name2i(link_cache, "enp0s8"))) {
+	if (!(master_index = rtnl_link_name2i(link_cache, "enp0s3"))) {
 		fprintf(stderr, "Unable to lookup enp0s3");
 		return -1;
 	}
 
-	for (i = 0; i < 3; i++) {
+	for (i = 1; i <= ifnum; i++) {
 		link = rtnl_link_macvlan_alloc();
 		rtnl_link_set_link(link, master_index);
 
@@ -126,22 +136,21 @@ main(int argc, char *argv[])
 				   rtnl_link_macvlan_str2mode("private"));
 
 		// construct interface name
-		sprintf(ifname, "vif%s", itoa(i));
+		create_virtual_interface_name(ifname, sizeof(ifname), i);
+
 		rtnl_link_set_name(link, ifname);
 		if ((err = rtnl_link_add(sock, link, NLM_F_CREATE)) < 0) {
 			nl_perror(err, "Unable to add link");
 			return err;
 		}
 
-		/* Since it is used with the getway and the DUT,
-		   0 and 1 are not used */
-		n = i + 2;
-		sprintf(addr, "2001:2:0:1::%s", itoa(n));
-		set_ip6addr(ifname, addr, 64);
+		create_string_ipv6addr(ipv6addr, sizeof(ipv6addr), i);
+		set_ip6addr(ifname, ipv6addr, 64);
 
 		ifup(rtnl_link_get_name(link));
 
 		rtnl_link_put(link);
+
 	}
 
 	nl_close(sock);
