@@ -82,17 +82,23 @@ create_virtual_interface_name(char *ifname, int ifname_len, int num)
 }
 
 static void
-create_string_ipv6addr(char *ipv6addr, int addr_len, int num)
+increment_string_ipv6addr(char *addr_str, int addrlen)
 {
-	char endaddr[8] = "";
+        struct in6_addr addr;
+        int i;
 
-	//Since .1 addr is used by DUT.
-	num++;
+        // convert string to address
+        inet_pton(AF_INET6, addr_str, &addr);
 
-	snprintf(endaddr, sizeof(endaddr), "%d", num);
-	snprintf(ipv6addr, addr_len, "2001:2:0:1::%s", endaddr);
+        // increase address by one
+        addr.s6_addr[15]++;
+        i = 15;
+        while (i > 0 && !addr.s6_addr[i--]) addr.s6_addr[i]++;
 
-	return;
+        // convert address to string
+        inet_ntop(AF_INET6, &addr, addr_str, addrlen);
+
+        return;
 }
 
 int
@@ -103,7 +109,7 @@ main(int argc, char *argv[])
 	struct nl_sock *sock;
 	int i, ifnum, err, master_index;
 	char ifname[8] = "";
-	char ipv6addr[48] = "";
+	char ipv6addr[46] = "2001:2:0:1::1";
 
 	if (argc != 2) {
                 fprintf(stderr, "./create-macvlan <interface num>\n");
@@ -144,7 +150,8 @@ main(int argc, char *argv[])
 			return err;
 		}
 
-		create_string_ipv6addr(ipv6addr, sizeof(ipv6addr), i);
+		// increment address
+		increment_string_ipv6addr(ipv6addr, sizeof(ipv6addr));
 		set_ip6addr(ifname, ipv6addr, 64);
 
 		ifup(rtnl_link_get_name(link));

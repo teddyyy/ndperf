@@ -8,15 +8,21 @@
 #include <linux/ipv6.h>
 
 static void
-create_string_ipv6addr(char *ipv6addr, int addr_len, int num)
+increment_string_ipv6addr(char *addr_str, int addrlen)
 {
-	char endaddr[8] = "";
+	struct in6_addr addr;
+	int i;
 
-	//Since .1 addr is used by DUT.
-	num++;
+	// convert string to address
+	inet_pton(AF_INET6, addr_str, &addr);
 
-	snprintf(endaddr, sizeof(endaddr), "%d", num);
-	snprintf(ipv6addr, addr_len, "2001:2:0:1::%s", endaddr);
+	// increase address by one
+	addr.s6_addr[15]++;
+	i = 15;
+	while (i > 0 && !addr.s6_addr[i--]) addr.s6_addr[i]++;
+
+	// convert address to string
+	inet_ntop(AF_INET6, &addr, addr_str, addrlen);
 
 	return;
 }
@@ -46,7 +52,7 @@ int
 main(int argc, char *argv[])
 {
 	int sock, len;
-	char dstaddr[48] = "";
+	char dstaddr[48] = "2001:2:0:1::1";
 	char srcaddr[48] = "2001:2:0:0::1";
 	char pkt[2048];
 	struct sockaddr_in6 dst_sin;
@@ -56,7 +62,7 @@ main(int argc, char *argv[])
 		return -1;
 	}
 
-	create_string_ipv6addr(dstaddr, sizeof(dstaddr), 1);
+	increment_string_ipv6addr(dstaddr, sizeof(dstaddr));
 	build_ipv6_hdr(pkt, srcaddr, dstaddr);
 
 	dst_sin.sin6_family = AF_INET6;
