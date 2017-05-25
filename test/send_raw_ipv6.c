@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip6.h>
@@ -51,31 +54,46 @@ build_ipv6_hdr(char *pkt, char *srcip, char *dstip)
 int
 main(int argc, char *argv[])
 {
-	int sock, len;
+	int sock, len, dstnum;
 	char dstaddr[48] = "2001:2:0:1::1";
 	char srcaddr[48] = "2001:2:0:0::1";
 	char pkt[2048];
 	struct sockaddr_in6 dst_sin;
+
+	if (argc != 2) {
+		fprintf(stderr, "./a.out <dst num>\n");
+		return -1;
+	}
+
+	dstnum = atoi(argv[1]);
 
 	if ((sock = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW)) < 0) {
 		perror("socket");
 		return -1;
 	}
 
-	increment_string_ipv6addr(dstaddr, sizeof(dstaddr));
-	build_ipv6_hdr(pkt, srcaddr, dstaddr);
+	// bind specific interface
+	setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE,
+		   "enp0s3", strlen("enp0s3") + 1);
 
-	dst_sin.sin6_family = AF_INET6;
-	if (inet_pton(AF_INET6, dstaddr, &(dst_sin.sin6_addr)) != 1) {
-		perror("inet_pton");
-		return -1;
-	}
+	for (int i = 1; i <= dstnum; i++) {
+		increment_string_ipv6addr(dstaddr, sizeof(dstaddr));
+		build_ipv6_hdr(pkt, srcaddr, dstaddr);
 
-	if ((len = sendto(sock, (void *)pkt, sizeof(struct ip6_hdr), 0,
-			  (struct sockaddr *)&dst_sin,
-			  sizeof(dst_sin))) == -1) {
-		perror("sendto");
-		return -1;
+		dst_sin.sin6_family = AF_INET6;
+		if (inet_pton(AF_INET6, dstaddr, &(dst_sin.sin6_addr)) != 1) {
+			perror("inet_pton");
+			return -1;
+		}
+
+		if ((len = sendto(sock, (void *)pkt, sizeof(struct ip6_hdr), 0,
+					(struct sockaddr *)&dst_sin,
+					sizeof(dst_sin))) == -1) {
+			perror("sendto");
+			return -1;
+		}
+
+		sleep(0.1);
 	}
 
 	return 0;
