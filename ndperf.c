@@ -45,9 +45,9 @@ build_ipv6_pkt(char *pkt, char *src, char *dst)
 
 	ip6h = (struct ip6_hdr*)pkt;
 
-	ip6h->ip6_flow = 0x60; // set ipv6 version
-	ip6h->ip6_plen = 0; // no payload
-	ip6h->ip6_nxt = 59; // no next header
+	ip6h->ip6_flow = 0x60;	// set IPv6 version
+	ip6h->ip6_plen = 0;	// no payload
+	ip6h->ip6_nxt = 59;	// no next header
 	ip6h->ip6_hlim = 255;
 
 	inet_pton(AF_INET6, src, &saddr);
@@ -73,6 +73,22 @@ set_signal(int sig)
 	}
 }
 
+static int
+init_tx_socket(char *ifn)
+{
+	int sock;
+
+	if ((sock = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW)) < 0) {
+		perror("socket");
+		return -1;
+	}
+
+	// bind specific interface
+	setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, ifn, strlen(ifn) + 1);
+
+	return sock;
+}
+
 static void
 usage(char *prgname)
 {
@@ -90,7 +106,7 @@ int
 main(int argc, char *argv[])
 {
 	int sock;
-	struct sockaddr_in6 dst_sin;
+	struct sockaddr_in6 dst;
 	char pkt[2048];
 
 	// for option
@@ -138,13 +154,11 @@ main(int argc, char *argv[])
 	if (nn < 1)
 		usage(prgname);
 
-	if ((sock = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW)) < 0) {
-		perror("socket");
+	// setup tx
+	if ((sock = init_tx_socket(ifname)) < 0) {
+		fprintf(stderr, "cannot initialize tx socket\n");
 		return -1;
 	}
-
-	// bind specific interface
-	setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname) + 1);
 
 	set_signal(SIGALRM);
 
@@ -174,11 +188,11 @@ main(int argc, char *argv[])
 			increment_string_ipv6addr(dstaddr, sizeof(dstaddr));
 			build_ipv6_pkt(pkt, srcaddr, dstaddr);
 
-			dst_sin.sin6_family = AF_INET6;
-			inet_pton(AF_INET6, dstaddr, &(dst_sin.sin6_addr));
+			dst.sin6_family = AF_INET6;
+			inet_pton(AF_INET6, dstaddr, &(dst.sin6_addr));
 
 			if (sendto(sock, (void *)pkt, sizeof(struct ip6_hdr), 0,
-				   (struct sockaddr *)&dst_sin, sizeof(dst_sin)) < 0) {
+				   (struct sockaddr *)&dst, sizeof(dst)) < 0) {
 				perror("sendto");
 				return -1;
 			}
