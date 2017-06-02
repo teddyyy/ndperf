@@ -1,19 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <signal.h>
-#include <sys/time.h>
-
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip6.h>
-#include <net/if.h>
-#include <arpa/inet.h>
-#include <linux/ipv6.h>
-
-#define DEFAULT_TIMER	60
+#include "ndperf.h"
 
 static bool expired = false;
 
@@ -73,6 +58,53 @@ set_signal(int sig)
 	}
 }
 
+static
+struct flow_counter * init_flow_counter()
+{
+        struct flow_counter *fc;
+
+        fc = malloc(sizeof(struct flow_counter));
+        fc->sent = 0;
+        fc->received = 0;
+
+        return fc;
+}
+
+static struct fc_ptr *
+setup_flow_counter(char *dstaddr, int node_num)
+{
+	struct fc_ptr *fcp = (struct fc_ptr*)malloc(sizeof(*fcp));
+
+	char addr[48];
+	strcpy(addr, dstaddr);
+
+	// initialize hash table
+	init_flow_hash();
+	fcp->keys = malloc(sizeof(char) * node_num * ADDRLEN);
+
+	for (int i = 0; i < node_num; i++) {
+                fcp->val = init_flow_counter();
+
+                increment_string_ipv6addr(addr, sizeof(addr));
+                strcpy(fcp->keys[i], addr);
+
+                // insert key and value
+                put_flow_hash(fcp->keys[i], fcp->val);
+        }
+
+	return fcp;
+}
+
+static void
+cleanup_flow_counter(struct fc_ptr *p)
+{
+	free(p->val);
+        free(p->keys);
+        free(p);
+
+        release_flow_hash();
+}
+
 static int
 init_tx_socket(char *ifn)
 {
@@ -111,8 +143,8 @@ main(int argc, char *argv[])
 
 	// for option
 	int  option, nn = 0;
-	char dstaddr[48];
-	char srcaddr[48];
+	char dstaddr[ADDRLEN];
+	char srcaddr[ADDRLEN];
 	char *prgname = 0, *ifname = 0, *firstaddr = 0;
 
 	prgname = argv[0];
@@ -176,6 +208,11 @@ main(int argc, char *argv[])
 	 * tx loop
 	 */
 	for (int i = 1; i <= nn; i++) {
+		// init hashtable
+		strcpy(dstaddr, firstaddr);
+		struct fc_ptr *fcp = setup_flow_counter(dstaddr, i);
+		strcpy(dstaddr, firstaddr);
+
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
 
@@ -197,6 +234,8 @@ main(int argc, char *argv[])
 				return -1;
 			}
 
+			countup_flow_hash(dstaddr, HASH_TX);
+
 			// stop increment, from begining
 			if (j == i) {
 				j = 0;
@@ -206,10 +245,15 @@ main(int argc, char *argv[])
 			usleep(50000);
 		}
 
+		// display stats of flow
+		print_flow_hash();
+
 		// stop timeout
 		setitimer(ITIMER_REAL, &stop, 0);
 		expired = false;
 
+		// clean hashtable
+		cleanup_flow_counter(fcp);
 	}
 
 	return 0;

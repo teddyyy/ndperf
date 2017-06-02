@@ -1,13 +1,14 @@
 CC = gcc
 
-objects = ndperf.o
+OBJ = ndperf.o flow.o
 CFLAGS = -Wall -g
 
-ndperf : $(objects)
-	$(CC) -o ndperf $(objects)
+ndperf : $(OBJ)
+	$(CC) -o ndperf $(OBJ)
+	rm $(OBJ)
 
 .c.o:
 	$(CC) $(CFLAGS) -c $*.c
 
 clean :
-	rm ndperf $(objects)
+	rm ndperf
