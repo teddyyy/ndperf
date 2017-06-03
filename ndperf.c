@@ -2,7 +2,7 @@
 
 static bool expired = false;
 
-static void
+void
 increment_string_ipv6addr(char *addr_str, int addrlen)
 {
 	struct in6_addr addr;
@@ -56,53 +56,6 @@ set_signal(int sig)
 		perror("signal");
 		exit(1);
 	}
-}
-
-static
-struct flow_counter * init_flow_counter()
-{
-        struct flow_counter *fc;
-
-        fc = malloc(sizeof(struct flow_counter));
-        fc->sent = 0;
-        fc->received = 0;
-
-        return fc;
-}
-
-static struct fc_ptr *
-setup_flow_counter(char *dstaddr, int node_num)
-{
-	struct fc_ptr *fcp = (struct fc_ptr*)malloc(sizeof(*fcp));
-
-	char addr[48];
-	strcpy(addr, dstaddr);
-
-	// initialize hash table
-	init_flow_hash();
-	fcp->keys = malloc(sizeof(char) * node_num * ADDRLEN);
-
-	for (int i = 0; i < node_num; i++) {
-                fcp->val = init_flow_counter();
-
-                increment_string_ipv6addr(addr, sizeof(addr));
-                strcpy(fcp->keys[i], addr);
-
-                // insert key and value
-                put_flow_hash(fcp->keys[i], fcp->val);
-        }
-
-	return fcp;
-}
-
-static void
-cleanup_flow_counter(struct fc_ptr *p)
-{
-	free(p->val);
-        free(p->keys);
-        free(p);
-
-        release_flow_hash();
 }
 
 static int

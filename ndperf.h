@@ -39,10 +39,18 @@ struct fc_ptr {
 	struct flow_counter *val;
 };
 
+void increment_string_ipv6addr(char *addr_str, int addrlen);
+
+/* flow */
 void init_flow_hash();
 void release_flow_hash();
 void print_flow_hash();
 void put_flow_hash(char *key, struct flow_counter *val);
 void countup_flow_hash(char *key, int mode);
+
+/* counter */
+struct flow_counter * init_flow_counter();
+struct fc_ptr * setup_flow_counter(char *dstaddr, int node_num);
+void cleanup_flow_counter(struct fc_ptr *p);
 
 #endif

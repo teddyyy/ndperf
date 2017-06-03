@@ -1,6 +1,6 @@
 CC = gcc
 
-OBJ = ndperf.o flow.o
+OBJ = ndperf.o flow.o counter.o
 CFLAGS = -Wall -g
 
 ndperf : $(OBJ)
