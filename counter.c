@@ -1,6 +1,7 @@
 #include "ndperf.h"
 #include "counter.h"
 
+static
 struct flow_counter * init_flow_counter()
 {
         struct flow_counter *fc;
@@ -17,7 +18,7 @@ setup_flow_counter(char *dstaddr, int node_num)
 {
         struct fc_ptr *fcp = (struct fc_ptr*)malloc(sizeof(*fcp));
 
-        char addr[48];
+        char addr[ADDRLEN];
         strcpy(addr, dstaddr);
 
         // initialize hash table
@@ -31,18 +32,18 @@ setup_flow_counter(char *dstaddr, int node_num)
                 strcpy(fcp->keys[i], addr);
 
                 // insert key and value
-                put_flow_hash(fcp->keys[i], fcp->val);
+                put_key_and_val_flow_hash(fcp->keys[i], fcp->val);
         }
 
         return fcp;
 }
 
 void
-cleanup_flow_counter(struct fc_ptr *p)
+cleanup_flow_counter(struct fc_ptr *fcp)
 {
-        free(p->val);
-        free(p->keys);
-        free(p);
+        free(fcp->val);
+        free(fcp->keys);
+        free(fcp);
 
         release_flow_hash();
 }
