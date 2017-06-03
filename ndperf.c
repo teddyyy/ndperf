@@ -18,8 +18,6 @@ increment_string_ipv6addr(char *addr_str, int addrlen)
 
 	// convert address to string
 	inet_ntop(AF_INET6, &addr, addr_str, addrlen);
-
-	return;
 }
 
 static void
@@ -39,8 +37,6 @@ build_ipv6_pkt(char *pkt, char *src, char *dst)
 	memcpy(&ip6h->ip6_src, &saddr, sizeof(saddr));
 	inet_pton(AF_INET6, dst, &daddr);
 	memcpy(&ip6h->ip6_dst, &daddr, sizeof(daddr));
-
-	return;
 }
 
 static void
@@ -95,7 +91,7 @@ main(int argc, char *argv[])
 	char pkt[2048];
 
 	// for option
-	int  option, nn = 0;
+	int  option, node_num = 0;
 	char dstaddr[ADDRLEN];
 	char srcaddr[ADDRLEN];
 	char *prgname = 0, *ifname = 0, *firstaddr = 0;
@@ -118,7 +114,7 @@ main(int argc, char *argv[])
 			firstaddr = optarg;
 			break;
 		case 'n':
-			nn = atoi(optarg);
+			node_num = atoi(optarg);
 			break;
 		default:
 			usage(prgname);
@@ -136,7 +132,7 @@ main(int argc, char *argv[])
 	if (ifname == 0 || srcaddr == 0 || dstaddr == 0)
 		usage(prgname);
 
-	if (nn < 1)
+	if (node_num < 1)
 		usage(prgname);
 
 	// setup tx
@@ -160,7 +156,7 @@ main(int argc, char *argv[])
 	/*
 	 * tx loop
 	 */
-	for (int i = 1; i <= nn; i++) {
+	for (int i = 1; i <= node_num; i++) {
 		// init hashtable
 		strcpy(dstaddr, firstaddr);
 		struct fc_ptr *fcp = setup_flow_counter(dstaddr, i);
@@ -169,7 +165,7 @@ main(int argc, char *argv[])
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
 
-		for (int j = 1; j <= i; j++) {
+		for (int count = 1; count <= i; count++) {
 
 			// send packet until timer expires
 			if (expired)
@@ -182,16 +178,13 @@ main(int argc, char *argv[])
 			inet_pton(AF_INET6, dstaddr, &(dst.sin6_addr));
 
 			if (sendto(sock, (void *)pkt, sizeof(struct ip6_hdr), 0,
-				   (struct sockaddr *)&dst, sizeof(dst)) < 0) {
-				perror("sendto");
-				return -1;
+				   (struct sockaddr *)&dst, sizeof(dst)) != -1) {
+				countup_val_flow_hash(dstaddr, HASH_TX);
 			}
 
-			countup_flow_hash(dstaddr, HASH_TX);
-
 			// stop increment, from begining
-			if (j == i) {
-				j = 0;
+			if (count == i) {
+				count = 0;
 				strcpy(dstaddr, firstaddr);
 			}
 

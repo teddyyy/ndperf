@@ -45,11 +45,10 @@ void increment_string_ipv6addr(char *addr_str, int addrlen);
 void init_flow_hash();
 void release_flow_hash();
 void print_flow_hash();
-void put_flow_hash(char *key, struct flow_counter *val);
-void countup_flow_hash(char *key, int mode);
+void put_key_and_val_flow_hash(char *key, struct flow_counter *val);
+void countup_val_flow_hash(char *key, int mode);
 
 /* counter */
-struct flow_counter * init_flow_counter();
 struct fc_ptr * setup_flow_counter(char *dstaddr, int node_num);
 void cleanup_flow_counter(struct fc_ptr *p);
 
