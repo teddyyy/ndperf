@@ -3,28 +3,20 @@
 static bool expired = false;
 
 void
-increment_string_ipv6addr(char *addr_str, int addrlen)
+increment_ipv6addr_plus_one(struct in6_addr *addr)
 {
-	struct in6_addr addr;
 	int i;
 
-	// convert string to address
-	inet_pton(AF_INET6, addr_str, &addr);
-
 	// increase address by one
-	addr.s6_addr[15]++;
+	addr->s6_addr[15]++;
 	i = 15;
-	while (i > 0 && !addr.s6_addr[i--]) addr.s6_addr[i]++;
-
-	// convert address to string
-	inet_ntop(AF_INET6, &addr, addr_str, addrlen);
+	while (i > 0 && !addr->s6_addr[i--]) addr->s6_addr[i]++;
 }
 
 static void
-build_ipv6_pkt(char *pkt, char *src, char *dst)
+build_ipv6_pkt(char *pkt, struct in6_addr *src, struct in6_addr *dst)
 {
 	struct ip6_hdr *ip6h;
-	struct in6_addr saddr, daddr;
 
 	ip6h = (struct ip6_hdr*)pkt;
 
@@ -32,11 +24,8 @@ build_ipv6_pkt(char *pkt, char *src, char *dst)
 	ip6h->ip6_plen = 0;	// no payload
 	ip6h->ip6_nxt = 59;	// no next header
 	ip6h->ip6_hlim = 255;
-
-	inet_pton(AF_INET6, src, &saddr);
-	memcpy(&ip6h->ip6_src, &saddr, sizeof(saddr));
-	inet_pton(AF_INET6, dst, &daddr);
-	memcpy(&ip6h->ip6_dst, &daddr, sizeof(daddr));
+	ip6h->ip6_src = *src;
+	ip6h->ip6_dst = *dst;
 }
 
 static void
@@ -94,9 +83,8 @@ main(int argc, char *argv[])
 
 	// for option
 	int  option, node_num = 0;
-	char dstaddr[ADDRLEN];
-	char srcaddr[ADDRLEN];
-	char *prgname = 0, *ifname = 0, *firstaddr = 0;
+	struct in6_addr srcaddr, dstaddr, start_addr;
+	char *prgname = 0, *ifname = 0;
 
 	prgname = argv[0];
 
@@ -109,11 +97,23 @@ main(int argc, char *argv[])
 			ifname = optarg;
 			break;
 		case 's':
-			strcpy(srcaddr, optarg);
+			if (inet_pton(AF_INET6, optarg, &srcaddr) != 1) {
+				fprintf(stderr, "cannot convert src address\n");
+				usage(prgname);
+			}
+
 			break;
 		case 'd':
-			strcpy(dstaddr, optarg);
-			firstaddr = optarg;
+			if (inet_pton(AF_INET6, optarg, &dstaddr) != 1) {
+				fprintf(stderr, "cannot convert dst address\n");
+				usage(prgname);
+			}
+
+			if (inet_pton(AF_INET6, optarg, &start_addr) != 1) {
+				fprintf(stderr, "cannot convert dst address\n");
+				usage(prgname);
+			}
+
 			break;
 		case 'n':
 			node_num = atoi(optarg);
@@ -131,7 +131,7 @@ main(int argc, char *argv[])
 		usage(prgname);
 	}
 
-	if (ifname == 0 || srcaddr == 0 || dstaddr == 0)
+	if (ifname == 0)
 		usage(prgname);
 
 	if (node_num < 1)
@@ -159,10 +159,9 @@ main(int argc, char *argv[])
 	 * tx loop
 	 */
 	for (int i = 1; i <= node_num; i++) {
-		// init hashtable
-		strcpy(dstaddr, firstaddr);
-		struct fc_ptr *fcp = setup_flow_counter(dstaddr, i);
-		strcpy(dstaddr, firstaddr);
+		// setup process
+		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, i);
+		dstaddr = start_addr;
 
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
@@ -173,35 +172,36 @@ main(int argc, char *argv[])
 			if (expired)
 				break;
 
-			increment_string_ipv6addr(dstaddr, sizeof(dstaddr));
-			build_ipv6_pkt(pkt, srcaddr, dstaddr);
+			increment_ipv6addr_plus_one(&dstaddr);
+			build_ipv6_pkt(pkt, &srcaddr, &dstaddr);
 
 			dst.sin6_family = AF_INET6;
-			inet_pton(AF_INET6, dstaddr, &(dst.sin6_addr));
+			dst.sin6_addr = dstaddr;
 
 			if (sendto(sock, (void *)pkt, sizeof(struct ip6_hdr), 0,
 				   (struct sockaddr *)&dst, sizeof(dst)) != -1) {
-				countup_val_flow_hash(dstaddr, HASH_TX);
+				countup_val_flow_hash(&dstaddr, HASH_TX);
 			}
 
 			// stop increment, from begining
 			if (count == i) {
 				count = 0;
-				strcpy(dstaddr, firstaddr);
+				dstaddr = start_addr;
 			}
 
 			usleep(50000);
 		}
 
 		// display stats of flow
-		print_flow_hash();
+		print_flow_hash(i);
 
 		// stop timeout
 		setitimer(ITIMER_REAL, &stop, 0);
 		expired = false;
 
-		// clean hashtable
+		// clean process
 		cleanup_flow_counter(fcp);
+		dstaddr = start_addr;
 	}
 
 	return 0;

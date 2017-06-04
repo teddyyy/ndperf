@@ -14,25 +14,25 @@ release_flow_hash()
 }
 
 void
-print_flow_hash()
+print_flow_hash(int node_num)
 {
-        const char *key;
         struct flow_counter *val;
 
-        kh_foreach(h, key, val,
+	printf("node number is %d\n", node_num);
+        kh_foreach_value(h, val,
 	{
-		printf("%s %lu %lu ", key, val->sent, val->received));
-		printf("\n");
+		printf("\t\tdstaddr:%s\tsent:%lu\treceived:%lu\n",
+		       val->addr_str, val->sent, val->received));
 	};
 }
 
 void
-put_key_and_val_flow_hash(char *key, struct flow_counter *val)
+put_key_and_val_flow_hash(struct in6_addr *key, struct flow_counter *val)
 {
         int ret;
         khiter_t k;
 
-        k = kh_put(flow_hash_t, h, key, &ret);
+        k = kh_put(flow_hash_t, h, addr6_hash(key), &ret);
         if (!ret)
                 kh_del(flow_hash_t, h, k);
         else
@@ -40,12 +40,12 @@ put_key_and_val_flow_hash(char *key, struct flow_counter *val)
 }
 
 void
-countup_val_flow_hash(char *key, int mode)
+countup_val_flow_hash(struct in6_addr *key, int mode)
 {
         struct flow_counter *val;
         khiter_t k;
 
-        k = kh_get(flow_hash_t, h, key);
+        k = kh_get(flow_hash_t, h, addr6_hash(key));
         if (k != kh_end(h))
                 val = kh_value(h, k);
 
