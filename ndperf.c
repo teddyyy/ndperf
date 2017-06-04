@@ -79,6 +79,8 @@ usage(char *prgname)
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
 	fprintf(stderr, "\t-n: neighbor number\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -n 3\n");
 
 	exit(0);
 }
