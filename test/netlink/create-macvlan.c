@@ -18,7 +18,7 @@ struct in6_ifreq
 };
 
 static
-int set_ip6addr(char *name, char *ip6addr, int prefixlen)
+int set_ip6addr(char *name, struct in6_addr *addr, int prefixlen)
 {
 	int fd;
 	struct in6_ifreq ifr;
@@ -27,8 +27,8 @@ int set_ip6addr(char *name, char *ip6addr, int prefixlen)
 	fd = socket(AF_INET6, SOCK_DGRAM, 0);
 
 	memset(&ifr, 0, sizeof(ifr));
-	inet_pton(AF_INET6, ip6addr, &ifr.ifr6_addr);
 
+	ifr.ifr6_addr = *addr;
 	ifr.ifr6_prefixlen = prefixlen;
 	ifr.ifr6_ifindex = if_nametoindex(name);
 
@@ -82,21 +82,14 @@ create_virtual_interface_name(char *ifname, int ifname_len, int num)
 }
 
 static void
-increment_string_ipv6addr(char *addr_str, int addrlen)
+increment_string_ipv6addr(struct in6_addr *addr)
 {
-        struct in6_addr addr;
-        int i;
-
-        // convert string to address
-        inet_pton(AF_INET6, addr_str, &addr);
+	int i;
 
         // increase address by one
-        addr.s6_addr[15]++;
+        addr->s6_addr[15]++;
         i = 15;
-        while (i > 0 && !addr.s6_addr[i--]) addr.s6_addr[i]++;
-
-        // convert address to string
-        inet_ntop(AF_INET6, &addr, addr_str, addrlen);
+        while (i > 0 && !addr->s6_addr[i--]) addr->s6_addr[i]++;
 
         return;
 }
@@ -109,7 +102,8 @@ main(int argc, char *argv[])
 	struct nl_sock *sock;
 	int i, ifnum, err, master_index;
 	char ifname[8] = "";
-	char ipv6addr[46] = "2001:2:0:1::1";
+	char addr_str[46] = "2001:2:0:1::1";
+	struct in6_addr addr;
 
 	if (argc != 2) {
                 fprintf(stderr, "./create-macvlan <interface num>\n");
@@ -117,6 +111,8 @@ main(int argc, char *argv[])
         }
 
         ifnum = atoi(argv[1]);
+
+	inet_pton(AF_INET6, addr_str, &addr);
 
 	sock = nl_socket_alloc();
 	if ((err = nl_connect(sock, NETLINK_ROUTE)) < 0) {
@@ -151,8 +147,9 @@ main(int argc, char *argv[])
 		}
 
 		// increment address
-		increment_string_ipv6addr(ipv6addr, sizeof(ipv6addr));
-		set_ip6addr(ifname, ipv6addr, 64);
+		increment_string_ipv6addr(&addr);
+
+		set_ip6addr(ifname, &addr, 64);
 
 		ifup(rtnl_link_get_name(link));
 
