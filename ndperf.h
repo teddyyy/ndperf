@@ -18,12 +18,15 @@
 
 #include "khash.h"
 
-#define DEFAULT_TIMER   60
+#define DEFAULT_TIMER		60
+#define DEFAULT_NEIGHBOR_NUM	1
 
-#define	ADDRSTRLEN	48
+#define MAX_NODE_NUMBER		8196
 
-#define HASH_TX 1
-#define HASH_RX 2
+#define	ADDRSTRLEN		48
+
+#define HASH_TX			1
+#define HASH_RX			2
 
 struct flow_counter {
 	char addr_str[ADDRSTRLEN];

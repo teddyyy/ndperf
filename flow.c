@@ -18,7 +18,7 @@ print_flow_hash(int node_num)
 {
         struct flow_counter *val;
 
-	printf("node number is %d\n", node_num);
+	printf("neighbor number is %d\n", node_num);
         kh_foreach_value(h, val,
 	{
 		printf("\t\tdstaddr:%s\tsent:%lu\treceived:%lu\n",

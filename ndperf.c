@@ -66,10 +66,11 @@ usage(char *prgname)
 	fprintf(stderr, "\t-i: interface\n");
 	fprintf(stderr, "\t-s: source IPv6 address\n");
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
-	fprintf(stderr, "\t-n: neighbor number\n");
+	fprintf(stderr, "\t-n: neighbor number (1-8195)\n");
+	fprintf(stderr, "\t-t: time when packet is being transmitted\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -n 3\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -n 3 -t 60\n");
 
 	exit(0);
 }
@@ -82,13 +83,13 @@ main(int argc, char *argv[])
 	char pkt[2048];
 
 	// for option
-	int  option, node_num = 0;
+	int  option, neighbor_num = 0, expire_time = 0;
 	struct in6_addr srcaddr, dstaddr, start_addr;
 	char *prgname = 0, *ifname = 0;
 
 	prgname = argv[0];
 
-	while ((option = getopt(argc, argv, "hi:s:d:n:")) > 0) {
+	while ((option = getopt(argc, argv, "hi:s:d:n:t:")) > 0) {
 		switch(option) {
 		case 'h':
 			usage(prgname);
@@ -116,7 +117,10 @@ main(int argc, char *argv[])
 
 			break;
 		case 'n':
-			node_num = atoi(optarg);
+			neighbor_num = atoi(optarg);
+			break;
+		case 't':
+			expire_time = atoi(optarg);
 			break;
 		default:
 			usage(prgname);
@@ -134,8 +138,11 @@ main(int argc, char *argv[])
 	if (ifname == 0)
 		usage(prgname);
 
-	if (node_num < 1)
-		usage(prgname);
+	if (neighbor_num < 1 || neighbor_num >= MAX_NODE_NUMBER)
+		neighbor_num = DEFAULT_NEIGHBOR_NUM;
+
+	if (expire_time < 1)
+		expire_time = DEFAULT_TIMER;
 
 	// setup tx
 	if ((sock = init_tx_socket(ifname)) < 0) {
@@ -146,7 +153,7 @@ main(int argc, char *argv[])
 	set_signal(SIGALRM);
 
 	const struct itimerval timer = {
-		.it_value.tv_sec = DEFAULT_TIMER,
+		.it_value.tv_sec = expire_time,
 		.it_value.tv_usec = 0
 	};
 
@@ -158,15 +165,15 @@ main(int argc, char *argv[])
 	/*
 	 * tx loop
 	 */
-	for (int i = 1; i <= node_num; i++) {
+	for (int node = 1; node <= neighbor_num; node++) {
 		// setup process
-		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, i);
+		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, node);
 		dstaddr = start_addr;
 
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
 
-		for (int count = 1; count <= i; count++) {
+		for (int count = 1; count <= node; count++) {
 
 			// send packet until timer expires
 			if (expired)
@@ -184,7 +191,7 @@ main(int argc, char *argv[])
 			}
 
 			// stop increment, from begining
-			if (count == i) {
+			if (count == node) {
 				count = 0;
 				dstaddr = start_addr;
 			}
@@ -193,7 +200,7 @@ main(int argc, char *argv[])
 		}
 
 		// display stats of flow
-		print_flow_hash(i);
+		print_flow_hash(node);
 
 		// stop timeout
 		setitimer(ITIMER_REAL, &stop, 0);
