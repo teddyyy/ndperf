@@ -20,12 +20,64 @@ build_ipv6_pkt(char *pkt, struct in6_addr *src, struct in6_addr *dst)
 
 	ip6h = (struct ip6_hdr*)pkt;
 
-	ip6h->ip6_flow = 0x60;	// set IPv6 version
+	ip6h->ip6_flow = 0x60;	// set protocol version
 	ip6h->ip6_plen = 0;	// no payload
 	ip6h->ip6_nxt = 59;	// no next header
 	ip6h->ip6_hlim = 255;
 	ip6h->ip6_src = *src;
 	ip6h->ip6_dst = *dst;
+}
+
+static int
+tx_packet(int sock, struct in6_addr *src, struct in6_addr *dst)
+{
+	char pkt[2048];
+	struct sockaddr_in6 in6;
+
+	build_ipv6_pkt(pkt, src, dst);
+
+	memset(&in6, 0, sizeof(struct sockaddr_in6));
+	in6.sin6_family = AF_INET6;
+	memcpy(&in6.sin6_addr, dst, sizeof(struct in6_addr));
+
+	int pktlen = sendto(sock, pkt, sizeof(struct ip6_hdr), 0,
+			   (struct sockaddr *)&in6, sizeof(in6));
+
+	return pktlen;
+}
+
+static void
+print_pkt_header(unsigned char *pkt)
+{
+	struct ip6_hdr *ip6;
+	char buf[80];
+
+	pkt += sizeof(struct ether_header);
+	ip6 = (struct ip6_hdr *)pkt;
+
+	printf("ip6_nxt=%u," ,ip6->ip6_nxt);
+	printf("src=%s\t", inet_ntop(AF_INET6, &ip6->ip6_src, buf, sizeof(buf)));
+	printf("dst=%s\n", inet_ntop(AF_INET6, &ip6->ip6_dst, buf, sizeof(buf)));
+
+}
+
+static void
+rx_packet(void *p)
+{
+	int sock = *(int *)p;
+	int pktlen;
+	unsigned char buf[2048];
+
+	printf("thread created\n");
+
+	for (;;) {
+		pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
+		if (pktlen < 0) {
+			perror("recv");
+		} else {
+			print_pkt_header(buf);
+		}
+	}
 }
 
 static void
@@ -43,34 +95,19 @@ set_signal(int sig)
 	}
 }
 
-static int
-init_tx_socket(char *ifn)
-{
-	int sock;
-
-	if ((sock = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW)) < 0) {
-		perror("socket");
-		return -1;
-	}
-
-	// bind specific interface
-	setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, ifn, strlen(ifn) + 1);
-
-	return sock;
-}
-
 static void
 usage(char *prgname)
 {
 	fprintf(stderr, "usage:\t%s\n", prgname);
-	fprintf(stderr, "\t-i: interface\n");
+	fprintf(stderr, "\t-i: interface(source)\n");
+	fprintf(stderr, "\t-r: interface(destination)\n");
 	fprintf(stderr, "\t-s: source IPv6 address\n");
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
 	fprintf(stderr, "\t-n: neighbor number (1-8195)\n");
 	fprintf(stderr, "\t-t: time when packet is being transmitted\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -n 3 -t 60\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -n 3 -t 60\n");
 
 	exit(0);
 }
@@ -78,24 +115,27 @@ usage(char *prgname)
 int
 main(int argc, char *argv[])
 {
-	int sock;
-	struct sockaddr_in6 dst;
-	char pkt[2048];
+	char *prgname = 0;
+	int tx_sock, rx_sock;
+	pthread_t rx_thread;
 
 	// for option
 	int  option, neighbor_num = 0, expire_time = 0;
-	struct in6_addr srcaddr, dstaddr, start_addr;
-	char *prgname = 0, *ifname = 0;
+	struct in6_addr srcaddr, dstaddr, start_dstaddr;
+	char *tx_if = 0, *rx_if = 0;
 
 	prgname = argv[0];
 
-	while ((option = getopt(argc, argv, "hi:s:d:n:t:")) > 0) {
+	while ((option = getopt(argc, argv, "hi:s:d:n:t:r:")) > 0) {
 		switch(option) {
 		case 'h':
 			usage(prgname);
 			break;
 		case 'i':
-			ifname = optarg;
+			tx_if = optarg;
+			break;
+		case 'r':
+			rx_if = optarg;
 			break;
 		case 's':
 			if (inet_pton(AF_INET6, optarg, &srcaddr) != 1) {
@@ -110,7 +150,7 @@ main(int argc, char *argv[])
 				usage(prgname);
 			}
 
-			if (inet_pton(AF_INET6, optarg, &start_addr) != 1) {
+			if (inet_pton(AF_INET6, optarg, &start_dstaddr) != 1) {
 				fprintf(stderr, "cannot convert dst address\n");
 				usage(prgname);
 			}
@@ -135,7 +175,7 @@ main(int argc, char *argv[])
 		usage(prgname);
 	}
 
-	if (ifname == 0)
+	if (tx_if == 0 || rx_if == 0)
 		usage(prgname);
 
 	if (neighbor_num < 1 || neighbor_num >= MAX_NODE_NUMBER)
@@ -145,10 +185,14 @@ main(int argc, char *argv[])
 		expire_time = DEFAULT_TIMER;
 
 	// setup tx
-	if ((sock = init_tx_socket(ifname)) < 0) {
+	if ((tx_sock = init_tx_socket(tx_if)) < 0) {
 		fprintf(stderr, "cannot initialize tx socket\n");
 		return -1;
 	}
+
+	// setup rx
+	create_virtual_interface(&dstaddr, neighbor_num, rx_if);
+	rx_sock = init_rx_socket(neighbor_num);
 
 	set_signal(SIGALRM);
 
@@ -163,37 +207,36 @@ main(int argc, char *argv[])
 	};
 
 	/*
-	 * tx loop
+	 * main loop
 	 */
 	for (int node = 1; node <= neighbor_num; node++) {
-		// setup process
+		// set counter
 		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, node);
-		dstaddr = start_addr;
 
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
 
-		for (int count = 1; count <= node; count++) {
+		// create receive thread
+		if (pthread_create(&rx_thread, NULL, (void *)rx_packet,
+		                  (void *)&rx_sock) != 0) {
+			perror("pthread_create");
+			exit(1);
+		}
 
+		for (int count = 1; count <= node; count++) {
 			// send packet until timer expires
 			if (expired)
 				break;
 
 			increment_ipv6addr_plus_one(&dstaddr);
-			build_ipv6_pkt(pkt, &srcaddr, &dstaddr);
 
-			dst.sin6_family = AF_INET6;
-			dst.sin6_addr = dstaddr;
-
-			if (sendto(sock, (void *)pkt, sizeof(struct ip6_hdr), 0,
-				   (struct sockaddr *)&dst, sizeof(dst)) != -1) {
+			if (tx_packet(tx_sock, &srcaddr, &dstaddr) != -1)
 				countup_val_flow_hash(&dstaddr, HASH_TX);
-			}
 
 			// stop increment, from begining
 			if (count == node) {
 				count = 0;
-				dstaddr = start_addr;
+				dstaddr = start_dstaddr;
 			}
 
 			usleep(50000);
@@ -207,9 +250,18 @@ main(int argc, char *argv[])
 		expired = false;
 
 		// clean process
+		pthread_cancel(rx_thread);
+		pthread_join(rx_thread, NULL);
+
+		// reset process
 		cleanup_flow_counter(fcp);
-		dstaddr = start_addr;
+		dstaddr = start_dstaddr;
 	}
+
+	delete_virtual_interface(neighbor_num);
+
+	close(tx_sock);
+	close(rx_sock);
 
 	return 0;
 }

@@ -19,7 +19,8 @@ struct fc_ptr *
 setup_flow_counter(struct in6_addr *addr, int node_num)
 {
         struct fc_ptr *fcp = (struct fc_ptr*)malloc(sizeof(*fcp));
-	struct in6_addr *dstaddr = addr;
+	struct in6_addr dstaddr;
+	memcpy(&dstaddr, addr, sizeof(struct in6_addr));
 
         // initialize hash table
         init_flow_hash();
@@ -27,11 +28,11 @@ setup_flow_counter(struct in6_addr *addr, int node_num)
 
         for (int i = 0; i < node_num; i++) {
 		// create key
-                increment_ipv6addr_plus_one(dstaddr);
-		fcp->keys[i] = *dstaddr;
+                increment_ipv6addr_plus_one(&dstaddr);
+		fcp->keys[i] = dstaddr;
 
 		// create val
-                fcp->val = init_flow_counter(dstaddr);
+                fcp->val = init_flow_counter(&dstaddr);
 
                 // insert key and value
                 put_key_and_val_flow_hash(&fcp->keys[i], fcp->val);
