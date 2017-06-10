@@ -21,7 +21,7 @@ print_flow_hash(int node_num)
 	printf("neighbor number is %d\n", node_num);
         kh_foreach_value(h, val,
 	{
-		printf("\t\tdstaddr:%s\tsent:%lu\treceived:%lu\n",
+		printf("\tdstaddr:%s\tsent:%lu\treceived:%lu\n",
 		       val->addr_str, val->sent, val->received));
 	};
 }
