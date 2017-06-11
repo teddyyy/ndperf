@@ -46,13 +46,14 @@ countup_val_flow_hash(struct in6_addr *key, int mode)
         khiter_t k;
 
         k = kh_get(flow_hash_t, h, addr6_hash(key));
-        if (k != kh_end(h))
+        if (k != kh_end(h)) {
                 val = kh_value(h, k);
 
-        if (mode == HASH_TX)
-                val->sent++;
-	else if (mode == HASH_RX)
-                val->received++;
+		if (mode == HASH_TX)
+			val->sent++;
+		else if (mode == HASH_RX)
+			val->received++;
 
-        kh_value(h, k) = val;
+		kh_value(h, k) = val;
+	}
 }

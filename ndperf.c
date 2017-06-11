@@ -28,6 +28,45 @@ build_ipv6_pkt(char *pkt, struct in6_addr *src, struct in6_addr *dst)
 	ip6h->ip6_dst = *dst;
 }
 
+static inline uint32_t addr6_eq(const struct in6_addr *a,
+				const struct in6_addr *b) {
+	return ((a->s6_addr32[3] == b->s6_addr32[3]) &&
+	        (a->s6_addr32[2] == b->s6_addr32[2]) &&
+	        (a->s6_addr32[1] == b->s6_addr32[1]) &&
+	        (a->s6_addr32[0] == b->s6_addr32[0]));
+}
+
+static struct in6_addr *
+parse_rx_packet(unsigned char *pkt, int len)
+{
+	struct ether_header *ether;
+	struct ip6_hdr *ip6;
+	struct in6_addr srcaddr;
+	struct in6_addr *dstaddr;
+
+	/* check packet length */
+	if (len < sizeof(struct ether_header) + sizeof(struct ip6_hdr))
+		return NULL;
+
+	/* check ethernet part */
+	ether = (struct ether_header *)pkt;
+	if (ntohs(ether->ether_type) != ETHERTYPE_IPV6)
+		return NULL;
+
+	/* check IPv6 part */
+	pkt += sizeof(struct ether_header);
+	ip6 = (struct ip6_hdr *)pkt;
+
+	inet_pton(AF_INET6, "2001:2:0:0::1", &srcaddr);
+
+	if (!addr6_eq(&ip6->ip6_src, &srcaddr) || ip6->ip6_nxt != 59)
+		return NULL;
+
+	dstaddr = &ip6->ip6_dst;
+
+	return  dstaddr;
+}
+
 static int
 tx_packet(int sock, struct in6_addr *src, struct in6_addr *dst)
 {
@@ -47,35 +86,20 @@ tx_packet(int sock, struct in6_addr *src, struct in6_addr *dst)
 }
 
 static void
-print_pkt_header(unsigned char *pkt)
-{
-	struct ip6_hdr *ip6;
-	char buf[80];
-
-	pkt += sizeof(struct ether_header);
-	ip6 = (struct ip6_hdr *)pkt;
-
-	printf("ip6_nxt=%u," ,ip6->ip6_nxt);
-	printf("src=%s\t", inet_ntop(AF_INET6, &ip6->ip6_src, buf, sizeof(buf)));
-	printf("dst=%s\n", inet_ntop(AF_INET6, &ip6->ip6_dst, buf, sizeof(buf)));
-
-}
-
-static void
-rx_packet(void *p)
+receive_thread(void *p)
 {
 	int sock = *(int *)p;
-	int pktlen;
 	unsigned char buf[2048];
-
-	printf("thread created\n");
+	struct in6_addr *dstaddr;
 
 	for (;;) {
-		pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
+		int pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
 		if (pktlen < 0) {
 			perror("recvfrom");
 		} else {
-			print_pkt_header(buf);
+			dstaddr = parse_rx_packet(buf, pktlen);
+			if (dstaddr != NULL)
+				countup_val_flow_hash(dstaddr, HASH_RX);
 		}
 	}
 }
@@ -228,7 +252,7 @@ main(int argc, char *argv[])
 		setitimer(ITIMER_REAL, &timer, 0);
 
 		// create receive thread
-		if (pthread_create(&rx_thread, NULL, (void *)rx_packet,
+		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
 		                  (void *)&rx_sock) != 0) {
 			perror("pthread_create");
 			exit(1);
