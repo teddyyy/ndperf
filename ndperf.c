@@ -73,7 +73,7 @@ rx_packet(void *p)
 	for (;;) {
 		pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
 		if (pktlen < 0) {
-			perror("recv");
+			perror("recvfrom");
 		} else {
 			print_pkt_header(buf);
 		}
@@ -191,8 +191,15 @@ main(int argc, char *argv[])
 	}
 
 	// setup rx
-	create_virtual_interface(&dstaddr, neighbor_num, rx_if);
-	rx_sock = init_rx_socket(neighbor_num);
+	if (create_virtual_interface(&dstaddr, neighbor_num, rx_if) < 0) {
+		fprintf(stderr, "cannot create interface\n");
+		return -1;
+	}
+
+	if ((rx_sock = init_rx_socket(neighbor_num)) < 0) {
+		fprintf(stderr, "cannot initialize rx socket\n");
+		return -1;
+	}
 
 	set_signal(SIGALRM);
 
@@ -212,6 +219,10 @@ main(int argc, char *argv[])
 	for (int node = 1; node <= neighbor_num; node++) {
 		// set counter
 		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, node);
+		if (fcp == NULL) {
+			fprintf(stderr, "cannot set flow counter\n");
+			return -1;
+		}
 
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
@@ -258,7 +269,10 @@ main(int argc, char *argv[])
 		dstaddr = start_dstaddr;
 	}
 
-	delete_virtual_interface(neighbor_num);
+	if ((delete_virtual_interface(neighbor_num)) < 0) {
+		fprintf(stderr, "cannot delete interface\n");
+		return -1;
+	}
 
 	close(tx_sock);
 	close(rx_sock);

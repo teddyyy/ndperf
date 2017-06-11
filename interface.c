@@ -109,9 +109,15 @@ create_virtual_interface(struct in6_addr *addr, int ifnum, char *ifname)
 		}
 
 		increment_ipv6addr_plus_one(&setaddr);
-		set_address(vif, &setaddr, 64);
+		if ((set_address(vif, &setaddr, 64)) < 0) {
+			fprintf(stderr, "cannot set address\n");
+			return -1;
+		}
 
-		up_interface(rtnl_link_get_name(link));
+		if ((up_interface(rtnl_link_get_name(link))) < 0) {
+			fprintf(stderr, "cannot linkup interface\n");
+			return -1;
+		}
 
 		rtnl_link_put(link);
 	}
