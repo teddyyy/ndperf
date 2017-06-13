@@ -1,15 +1,25 @@
 #include "ndperf.h"
 #include "interface.h"
 
-static void
+static int
 create_virtual_interface_name(char *ifname, int ifname_len, int num)
 {
+	int err;
 	char ifindex[4] = "";
 
-	snprintf(ifindex, sizeof(ifindex), "%d", num);
-	snprintf(ifname, ifname_len, "vif%s", ifindex);
+	err = snprintf(ifindex, sizeof(ifindex), "%d", num);
+	if (err < 0) {
+		perror("snprintf");
+		return err;
+	}
 
-	return;
+	snprintf(ifname, ifname_len, "vif%s", ifindex);
+	if (err < 0) {
+		perror("snprintf");
+		return err;
+	}
+
+	return 0;
 }
 
 static
@@ -43,7 +53,7 @@ int set_address(char *ifname, struct in6_addr *addr, int prefixlen)
 {
 	int fd;
 	struct in6_ifreq ifr;
-	int ret;
+	int err;
 
 	fd = socket(AF_INET6, SOCK_DGRAM, 0);
 
@@ -53,10 +63,10 @@ int set_address(char *ifname, struct in6_addr *addr, int prefixlen)
 	ifr.ifr6_prefixlen = prefixlen;
 	ifr.ifr6_ifindex = if_nametoindex(ifname);
 
-	ret = ioctl(fd, SIOCSIFADDR, &ifr);
-	if (ret < 0) {
+	err = ioctl(fd, SIOCSIFADDR, &ifr);
+	if (err < 0) {
 		perror("ioctl");
-		return -1;
+		return err;
 	}
 
 	close(fd);
@@ -100,7 +110,10 @@ create_virtual_interface(struct in6_addr *addr, int ifnum, char *ifname)
 			rtnl_link_macvlan_str2mode("private"));
 
 		// construct interface name
-		create_virtual_interface_name(vif, sizeof(vif), i);
+		if ((err = create_virtual_interface_name(vif, sizeof(vif), i)) < 0) {
+			fprintf(stderr, "Unable to create interface name\n");
+			return err;
+		}
 
 		rtnl_link_set_name(link, vif);
 		if ((err = rtnl_link_add(sock, link, NLM_F_CREATE)) < 0) {
@@ -109,14 +122,14 @@ create_virtual_interface(struct in6_addr *addr, int ifnum, char *ifname)
 		}
 
 		increment_ipv6addr_plus_one(&setaddr);
-		if ((set_address(vif, &setaddr, 64)) < 0) {
-			fprintf(stderr, "cannot set address\n");
-			return -1;
+		if ((err = set_address(vif, &setaddr, 64)) < 0) {
+			fprintf(stderr, "Unable to set address\n");
+			return err;
 		}
 
-		if ((up_interface(rtnl_link_get_name(link))) < 0) {
-			fprintf(stderr, "cannot linkup interface\n");
-			return -1;
+		if ((err = up_interface(rtnl_link_get_name(link))) < 0) {
+			fprintf(stderr, "Unable to up interface\n");
+			return err;
 		}
 
 		rtnl_link_put(link);
@@ -145,7 +158,10 @@ delete_virtual_interface(int ifnum)
 		link = rtnl_link_alloc();
 
 		// construct interface name
-                create_virtual_interface_name(vif, sizeof(vif), i);
+                if ((err = create_virtual_interface_name(vif, sizeof(vif), i)) < 0) {
+			fprintf(stderr, "Unable to create interface name\n");
+			return err;
+		}
 
 		rtnl_link_set_name(link, vif);
 
@@ -181,7 +197,7 @@ init_tx_socket(char *ifname)
 int
 init_rx_socket(int ifnum)
 {
-	int sock;
+	int sock, err;
 	char vif[8] = "";
 
 	if ((sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IPV6))) < 0) {
@@ -191,7 +207,10 @@ init_rx_socket(int ifnum)
 
 	for (int i = 1; i <= ifnum; i++) {
 		// construct interface name
-                create_virtual_interface_name(vif, sizeof(vif), i);
+                if ((err = create_virtual_interface_name(vif, sizeof(vif), i)) < 0) {
+			fprintf(stderr, "Unable to create interface name\n");
+			return err;
+		}
 
 		// bind specific interface
 		setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, vif, strlen(vif) + 1);

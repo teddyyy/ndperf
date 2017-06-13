@@ -163,19 +163,19 @@ main(int argc, char *argv[])
 			break;
 		case 's':
 			if (inet_pton(AF_INET6, optarg, &srcaddr) != 1) {
-				fprintf(stderr, "cannot convert src address\n");
+				fprintf(stderr, "Unable to convert src address\n");
 				usage(prgname);
 			}
 
 			break;
 		case 'd':
 			if (inet_pton(AF_INET6, optarg, &dstaddr) != 1) {
-				fprintf(stderr, "cannot convert dst address\n");
+				fprintf(stderr, "Unable to convert dst address\n");
 				usage(prgname);
 			}
 
 			if (inet_pton(AF_INET6, optarg, &start_dstaddr) != 1) {
-				fprintf(stderr, "cannot convert dst address\n");
+				fprintf(stderr, "Unable to convert dst address\n");
 				usage(prgname);
 			}
 
@@ -210,18 +210,18 @@ main(int argc, char *argv[])
 
 	// setup tx
 	if ((tx_sock = init_tx_socket(tx_if)) < 0) {
-		fprintf(stderr, "cannot initialize tx socket\n");
+		fprintf(stderr, "Unable to initialize tx socket\n");
 		return -1;
 	}
 
 	// setup rx
 	if (create_virtual_interface(&dstaddr, neighbor_num, rx_if) < 0) {
-		fprintf(stderr, "cannot create interface\n");
+		fprintf(stderr, "Unable to create interface\n");
 		return -1;
 	}
 
 	if ((rx_sock = init_rx_socket(neighbor_num)) < 0) {
-		fprintf(stderr, "cannot initialize rx socket\n");
+		fprintf(stderr, "Unable to initialize rx socket\n");
 		return -1;
 	}
 
@@ -244,7 +244,7 @@ main(int argc, char *argv[])
 		// set counter
 		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, node);
 		if (fcp == NULL) {
-			fprintf(stderr, "cannot set flow counter\n");
+			fprintf(stderr, "Unable to set flow counter\n");
 			return -1;
 		}
 
@@ -294,7 +294,7 @@ main(int argc, char *argv[])
 	}
 
 	if ((delete_virtual_interface(neighbor_num)) < 0) {
-		fprintf(stderr, "cannot delete interface\n");
+		fprintf(stderr, "Unable to delete interface\n");
 		return -1;
 	}
 

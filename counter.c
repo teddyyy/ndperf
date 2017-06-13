@@ -50,7 +50,7 @@ setup_flow_counter(struct in6_addr *addr, int node_num)
 		// create value
                 fcp->val = init_flow_counter(&dstaddr);
 		if (fcp->val == NULL) {
-			fprintf(stderr, "cannot initialize flow counter\n");
+			fprintf(stderr, "Unable to initialize flow counter\n");
 			return NULL;
 		}
 
