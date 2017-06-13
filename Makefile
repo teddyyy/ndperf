@@ -13,4 +13,4 @@ ndperf : $(OBJ)
 
 .PHONY: clean
 clean :
-	rm ndperf $(OBJ)
+	rm -f ndperf $(OBJ)
