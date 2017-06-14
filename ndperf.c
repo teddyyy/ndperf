@@ -37,11 +37,10 @@ static inline uint32_t addr6_eq(const struct in6_addr *a,
 }
 
 static struct in6_addr *
-parse_rx_packet(unsigned char *pkt, int len)
+parse_rx_packet(unsigned char *pkt, int len, struct in6_addr *dutaddr)
 {
 	struct ether_header *ether;
 	struct ip6_hdr *ip6;
-	struct in6_addr srcaddr;
 	struct in6_addr *dstaddr;
 
 	/* check packet length */
@@ -57,9 +56,7 @@ parse_rx_packet(unsigned char *pkt, int len)
 	pkt += sizeof(struct ether_header);
 	ip6 = (struct ip6_hdr *)pkt;
 
-	inet_pton(AF_INET6, "2001:2:0:0::1", &srcaddr);
-
-	if (!addr6_eq(&ip6->ip6_src, &srcaddr) || ip6->ip6_nxt != 59)
+	if (!addr6_eq(&ip6->ip6_src, dutaddr) || ip6->ip6_nxt != 59)
 		return NULL;
 
 	dstaddr = &ip6->ip6_dst;
@@ -86,18 +83,21 @@ tx_packet(int sock, struct in6_addr *src, struct in6_addr *dst)
 }
 
 static void
-receive_thread(void *p)
+receive_thread(void *conf)
 {
-	int sock = *(int *)p;
 	unsigned char buf[2048];
 	struct in6_addr *dstaddr;
+	struct ndperf_config *nc = (struct ndperf_config *)conf;
+
+	int sock = nc->rx_sock;
+	struct in6_addr dutaddr = nc->dstaddr;
 
 	for (;;) {
 		int pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
 		if (pktlen < 0) {
 			perror("recvfrom");
 		} else {
-			dstaddr = parse_rx_packet(buf, pktlen);
+			dstaddr = parse_rx_packet(buf, pktlen, &dutaddr);
 			if (dstaddr != NULL)
 				countup_val_flow_hash(dstaddr, HASH_RX);
 		}
@@ -140,12 +140,12 @@ int
 main(int argc, char *argv[])
 {
 	char *prgname = 0;
-	int tx_sock, rx_sock;
+	struct ndperf_config conf;
 	pthread_t rx_thread;
 
 	// for option
-	int  option, neighbor_num = 0, expire_time = 0;
-	struct in6_addr srcaddr, dstaddr, start_dstaddr;
+	int option;
+	struct in6_addr start_dstaddr;
 	char *tx_if = 0, *rx_if = 0;
 
 	prgname = argv[0];
@@ -162,14 +162,14 @@ main(int argc, char *argv[])
 			rx_if = optarg;
 			break;
 		case 's':
-			if (inet_pton(AF_INET6, optarg, &srcaddr) != 1) {
+			if (inet_pton(AF_INET6, optarg, &conf.srcaddr) != 1) {
 				fprintf(stderr, "Unable to convert src address\n");
 				usage(prgname);
 			}
 
 			break;
 		case 'd':
-			if (inet_pton(AF_INET6, optarg, &dstaddr) != 1) {
+			if (inet_pton(AF_INET6, optarg, &conf.dstaddr) != 1) {
 				fprintf(stderr, "Unable to convert dst address\n");
 				usage(prgname);
 			}
@@ -181,10 +181,10 @@ main(int argc, char *argv[])
 
 			break;
 		case 'n':
-			neighbor_num = atoi(optarg);
+			conf.neighbor_num = atoi(optarg);
 			break;
 		case 't':
-			expire_time = atoi(optarg);
+			conf.expire_time = atoi(optarg);
 			break;
 		default:
 			usage(prgname);
@@ -202,25 +202,25 @@ main(int argc, char *argv[])
 	if (tx_if == 0 || rx_if == 0)
 		usage(prgname);
 
-	if (neighbor_num < 1 || neighbor_num >= MAX_NODE_NUMBER)
-		neighbor_num = DEFAULT_NEIGHBOR_NUM;
+	if (conf.neighbor_num < 1 || conf.neighbor_num >= MAX_NODE_NUMBER)
+		conf.neighbor_num = DEFAULT_NEIGHBOR_NUM;
 
-	if (expire_time < 1)
-		expire_time = DEFAULT_TIMER;
+	if (conf.expire_time < 1)
+		conf.expire_time = DEFAULT_TIMER;
 
 	// setup tx
-	if ((tx_sock = init_tx_socket(tx_if)) < 0) {
+	if ((conf.tx_sock = init_tx_socket(tx_if)) < 0) {
 		fprintf(stderr, "Unable to initialize tx socket\n");
 		return -1;
 	}
 
 	// setup rx
-	if (create_virtual_interface(&dstaddr, neighbor_num, rx_if) < 0) {
+	if (create_virtual_interface(&conf.dstaddr, conf.neighbor_num, rx_if) < 0) {
 		fprintf(stderr, "Unable to create interface\n");
 		return -1;
 	}
 
-	if ((rx_sock = init_rx_socket(neighbor_num)) < 0) {
+	if ((conf.rx_sock = init_rx_socket(conf.neighbor_num)) < 0) {
 		fprintf(stderr, "Unable to initialize rx socket\n");
 		return -1;
 	}
@@ -228,7 +228,7 @@ main(int argc, char *argv[])
 	set_signal(SIGALRM);
 
 	const struct itimerval timer = {
-		.it_value.tv_sec = expire_time,
+		.it_value.tv_sec = conf.expire_time,
 		.it_value.tv_usec = 0
 	};
 
@@ -240,9 +240,9 @@ main(int argc, char *argv[])
 	/*
 	 * main loop
 	 */
-	for (int node = 1; node <= neighbor_num; node++) {
+	for (int node = 1; node <= conf.neighbor_num; node++) {
 		// set counter
-		struct fc_ptr *fcp = setup_flow_counter(&dstaddr, node);
+		struct fc_ptr *fcp = setup_flow_counter(&conf.dstaddr, node);
 		if (fcp == NULL) {
 			fprintf(stderr, "Unable to set flow counter\n");
 			return -1;
@@ -253,7 +253,7 @@ main(int argc, char *argv[])
 
 		// create receive thread
 		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
-		                  (void *)&rx_sock) != 0) {
+		                  (void *)&conf) != 0) {
 			perror("pthread_create");
 			exit(1);
 		}
@@ -263,15 +263,15 @@ main(int argc, char *argv[])
 			if (expired)
 				break;
 
-			increment_ipv6addr_plus_one(&dstaddr);
+			increment_ipv6addr_plus_one(&conf.dstaddr);
 
-			if (tx_packet(tx_sock, &srcaddr, &dstaddr) != -1)
-				countup_val_flow_hash(&dstaddr, HASH_TX);
+			if (tx_packet(conf.tx_sock, &conf.srcaddr, &conf.dstaddr) != -1)
+				countup_val_flow_hash(&conf.dstaddr, HASH_TX);
 
 			// stop increment, from begining
 			if (count == node) {
 				count = 0;
-				dstaddr = start_dstaddr;
+				conf.dstaddr = start_dstaddr;
 			}
 
 			usleep(50000);
@@ -290,16 +290,16 @@ main(int argc, char *argv[])
 
 		// reset process
 		cleanup_flow_counter(fcp);
-		dstaddr = start_dstaddr;
+		conf.dstaddr = start_dstaddr;
 	}
 
-	if ((delete_virtual_interface(neighbor_num)) < 0) {
+	if ((delete_virtual_interface(conf.neighbor_num)) < 0) {
 		fprintf(stderr, "Unable to delete interface\n");
 		return -1;
 	}
 
-	close(tx_sock);
-	close(rx_sock);
+	close(conf.tx_sock);
+	close(conf.rx_sock);
 
 	return 0;
 }
