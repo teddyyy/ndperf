@@ -44,6 +44,17 @@ struct fc_ptr {
 	struct flow_counter *val;
 };
 
+struct ndperf_config {
+        int tx_sock;
+        int rx_sock;
+
+        int neighbor_num;
+        int expire_time;
+
+        struct in6_addr srcaddr;
+        struct in6_addr dstaddr;
+};
+
 void increment_ipv6addr_plus_one(struct in6_addr *addr);
 
 /* flow */
