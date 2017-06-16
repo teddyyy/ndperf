@@ -53,6 +53,7 @@ struct ndperf_config {
 
         struct in6_addr srcaddr;
         struct in6_addr dstaddr;
+        struct in6_addr start_dstaddr;
 };
 
 void increment_ipv6addr_plus_one(struct in6_addr *addr);
