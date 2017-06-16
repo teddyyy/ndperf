@@ -1,6 +1,7 @@
 #include "ndperf.h"
 
 static bool expired = false;
+static bool caught_signal = false;
 
 void
 increment_ipv6addr_plus_one(struct in6_addr *addr)
@@ -151,7 +152,7 @@ process_packet(struct ndperf_config *nc)
 
 		for (int count = 1; count <= node; count++) {
 			// send packet until timer expires
-			if (expired)
+			if (expired || caught_signal)
 				break;
 
 			increment_ipv6addr_plus_one(&nc->dstaddr);
@@ -180,9 +181,27 @@ process_packet(struct ndperf_config *nc)
 
 		cleanup_flow_counter(fcp);
 		nc->dstaddr = nc->start_dstaddr;
+
+		if (caught_signal)
+			break;
 	}
 
 	cleanup_process(nc);
+}
+
+static void
+interrupt(int sig)
+{
+	caught_signal = true;
+}
+
+static void
+set_interrupt_signal(int sig)
+{
+	if (signal(sig, interrupt) == SIG_ERR) {
+		perror("signal");
+		exit(1);
+	}
 }
 
 static void
@@ -192,7 +211,7 @@ timeout(int sig)
 }
 
 static void
-set_signal(int sig)
+set_timeout_signal(int sig)
 {
 	if (signal(sig, timeout) == SIG_ERR) {
 		perror("signal");
@@ -304,7 +323,8 @@ main(int argc, char *argv[])
 		return -1;
 	}
 
-	set_signal(SIGALRM);
+	set_interrupt_signal(SIGINT);
+	set_timeout_signal(SIGALRM);
 
 	/* main process */
 	process_packet(&conf);
