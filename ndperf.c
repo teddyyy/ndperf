@@ -29,7 +29,8 @@ build_ipv6_pkt(char *pkt, struct in6_addr *src, struct in6_addr *dst)
 }
 
 static inline uint32_t addr6_eq(const struct in6_addr *a,
-				const struct in6_addr *b) {
+				const struct in6_addr *b)
+{
 	return ((a->s6_addr32[3] == b->s6_addr32[3]) &&
 	        (a->s6_addr32[2] == b->s6_addr32[2]) &&
 	        (a->s6_addr32[1] == b->s6_addr32[1]) &&
@@ -56,7 +57,7 @@ parse_rx_packet(unsigned char *pkt, int len, struct in6_addr *dutaddr)
 	pkt += sizeof(struct ether_header);
 	ip6 = (struct ip6_hdr *)pkt;
 
-	if (!addr6_eq(&ip6->ip6_src, dutaddr) || ip6->ip6_nxt != 59)
+	if (!addr6_eq(&ip6->ip6_src, dutaddr) || ip6->ip6_nxt != 58)
 		return NULL;
 
 	dstaddr = &ip6->ip6_dst;
@@ -86,22 +87,102 @@ static void
 receive_thread(void *conf)
 {
 	unsigned char buf[2048];
-	struct in6_addr *dstaddr;
-	struct ndperf_config *nc = (struct ndperf_config *)conf;
 
+	struct ndperf_config *nc = (struct ndperf_config *)conf;
 	int sock = nc->rx_sock;
-	struct in6_addr dutaddr = nc->dstaddr;
+	struct in6_addr dutaddr = nc->start_dstaddr;
 
 	for (;;) {
 		int pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
 		if (pktlen < 0) {
 			perror("recvfrom");
 		} else {
-			dstaddr = parse_rx_packet(buf, pktlen, &dutaddr);
+			struct in6_addr *dstaddr = parse_rx_packet(buf, pktlen, &dutaddr);
 			if (dstaddr != NULL)
 				countup_val_flow_hash(dstaddr, HASH_RX);
 		}
 	}
+}
+
+static void
+cleanup_process(struct ndperf_config *nc)
+{
+	if ((delete_virtual_interface(nc->neighbor_num)) < 0) {
+                fprintf(stderr, "Unable to delete interface\n");
+                exit(1);
+        }
+
+        close(nc->tx_sock);
+        close(nc->rx_sock);
+}
+
+static void
+process_packet(struct ndperf_config *nc)
+{
+	pthread_t rx_thread;
+
+	const struct itimerval timer = {
+		.it_value.tv_sec = nc->expire_time,
+		.it_value.tv_usec = 0
+	};
+
+	const struct itimerval stop = {
+		.it_value.tv_sec = 0,
+		.it_value.tv_usec = 0
+	};
+
+	for (int node = 1; node <= nc->neighbor_num; node++) {
+		// set counter
+		struct fc_ptr *fcp = setup_flow_counter(&nc->dstaddr, node);
+		if (fcp == NULL) {
+			fprintf(stderr, "Unable to set flow counter\n");
+			exit(1);
+		}
+
+		// set timeout
+		setitimer(ITIMER_REAL, &timer, 0);
+
+		// create receive thread
+		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
+		                  (void *)nc) != 0) {
+			perror("pthread_create");
+			exit(1);
+		}
+
+		for (int count = 1; count <= node; count++) {
+			// send packet until timer expires
+			if (expired)
+				break;
+
+			increment_ipv6addr_plus_one(&nc->dstaddr);
+
+			if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
+				countup_val_flow_hash(&nc->dstaddr, HASH_TX);
+
+			// stop increment, from begining
+			if (count == node) {
+				count = 0;
+				nc->dstaddr = nc->start_dstaddr;
+			}
+
+			usleep(50000);
+		}
+
+		// display stats of flow
+		print_flow_hash(node);
+
+		// stop timeout
+		setitimer(ITIMER_REAL, &stop, 0);
+		expired = false;
+
+		pthread_cancel(rx_thread);
+		pthread_join(rx_thread, NULL);
+
+		cleanup_flow_counter(fcp);
+		nc->dstaddr = nc->start_dstaddr;
+	}
+
+	cleanup_process(nc);
 }
 
 static void
@@ -141,11 +222,9 @@ main(int argc, char *argv[])
 {
 	char *prgname = 0;
 	struct ndperf_config conf;
-	pthread_t rx_thread;
 
 	// for option
 	int option;
-	struct in6_addr start_dstaddr;
 	char *tx_if = 0, *rx_if = 0;
 
 	prgname = argv[0];
@@ -174,7 +253,7 @@ main(int argc, char *argv[])
 				usage(prgname);
 			}
 
-			if (inet_pton(AF_INET6, optarg, &start_dstaddr) != 1) {
+			if (inet_pton(AF_INET6, optarg, &conf.start_dstaddr) != 1) {
 				fprintf(stderr, "Unable to convert dst address\n");
 				usage(prgname);
 			}
@@ -227,79 +306,8 @@ main(int argc, char *argv[])
 
 	set_signal(SIGALRM);
 
-	const struct itimerval timer = {
-		.it_value.tv_sec = conf.expire_time,
-		.it_value.tv_usec = 0
-	};
-
-	const struct itimerval stop = {
-		.it_value.tv_sec = 0,
-		.it_value.tv_usec = 0
-	};
-
-	/*
-	 * main loop
-	 */
-	for (int node = 1; node <= conf.neighbor_num; node++) {
-		// set counter
-		struct fc_ptr *fcp = setup_flow_counter(&conf.dstaddr, node);
-		if (fcp == NULL) {
-			fprintf(stderr, "Unable to set flow counter\n");
-			return -1;
-		}
-
-		// set timeout
-		setitimer(ITIMER_REAL, &timer, 0);
-
-		// create receive thread
-		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
-		                  (void *)&conf) != 0) {
-			perror("pthread_create");
-			exit(1);
-		}
-
-		for (int count = 1; count <= node; count++) {
-			// send packet until timer expires
-			if (expired)
-				break;
-
-			increment_ipv6addr_plus_one(&conf.dstaddr);
-
-			if (tx_packet(conf.tx_sock, &conf.srcaddr, &conf.dstaddr) != -1)
-				countup_val_flow_hash(&conf.dstaddr, HASH_TX);
-
-			// stop increment, from begining
-			if (count == node) {
-				count = 0;
-				conf.dstaddr = start_dstaddr;
-			}
-
-			usleep(50000);
-		}
-
-		// display stats of flow
-		print_flow_hash(node);
-
-		// stop timeout
-		setitimer(ITIMER_REAL, &stop, 0);
-		expired = false;
-
-		// clean process
-		pthread_cancel(rx_thread);
-		pthread_join(rx_thread, NULL);
-
-		// reset process
-		cleanup_flow_counter(fcp);
-		conf.dstaddr = start_dstaddr;
-	}
-
-	if ((delete_virtual_interface(conf.neighbor_num)) < 0) {
-		fprintf(stderr, "Unable to delete interface\n");
-		return -1;
-	}
-
-	close(conf.tx_sock);
-	close(conf.rx_sock);
+	/* main process */
+	process_packet(&conf);
 
 	return 0;
 }
