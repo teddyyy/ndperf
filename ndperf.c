@@ -108,7 +108,10 @@ receive_thread(void *conf)
 static void
 cleanup_process(struct ndperf_config *nc)
 {
-	if ((delete_virtual_interface(nc->neighbor_num)) < 0) {
+	int ret;
+
+	ret = delete_virtual_interface(nc->neighbor_num);
+	if (ret < 0) {
                 fprintf(stderr, "Unable to delete interface\n");
                 exit(1);
         }
@@ -227,13 +230,25 @@ usage(char *prgname)
 	fprintf(stderr, "\t-r: interface(destination)\n");
 	fprintf(stderr, "\t-s: source IPv6 address\n");
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
-	fprintf(stderr, "\t-n: neighbor number (1-8195)\n");
-	fprintf(stderr, "\t-t: time when packet is being transmitted\n");
+	fprintf(stderr, "\t-n: neighbor number (default:1)\n");
+	fprintf(stderr, "\t-t: time when packet is being transmitted (default:60)\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -n 3 -t 60\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1\n");
 
 	exit(0);
+}
+
+static void
+init_ndperf_config(struct ndperf_config *nc)
+{
+	nc->tx_sock = 0;
+	nc->rx_sock = 0;
+	nc->neighbor_num = 0;
+	nc->expire_time = 0;
+	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
+	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
+	memset(&nc->start_dstaddr, 0, sizeof(nc->start_dstaddr));
 }
 
 int
@@ -247,6 +262,8 @@ main(int argc, char *argv[])
 	char *tx_if = 0, *rx_if = 0;
 
 	prgname = argv[0];
+
+	init_ndperf_config(&conf);
 
 	while ((option = getopt(argc, argv, "hi:s:d:n:t:r:")) > 0) {
 		switch(option) {
