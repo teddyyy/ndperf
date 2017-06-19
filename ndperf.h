@@ -54,6 +54,7 @@ struct ndperf_config {
         struct in6_addr srcaddr;
         struct in6_addr dstaddr;
         struct in6_addr start_dstaddr;
+        int prefixlen;
 };
 
 void increment_ipv6addr_plus_one(struct in6_addr *addr);
@@ -70,7 +71,7 @@ struct fc_ptr * setup_flow_counter(struct in6_addr *addr, int node_num);
 void cleanup_flow_counter(struct fc_ptr *p);
 
 /* interface */
-int create_virtual_interface(struct in6_addr *addr, int dstnum, char *pif);
+int create_virtual_interface(struct in6_addr *addr, int prefixlen, int dstnum, char *pif);
 int delete_virtual_interface(int ifnum);
 int init_tx_socket(char *ifname);
 int init_rx_socket(int ifnum);

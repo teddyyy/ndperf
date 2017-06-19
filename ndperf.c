@@ -230,11 +230,12 @@ usage(char *prgname)
 	fprintf(stderr, "\t-r: interface(destination)\n");
 	fprintf(stderr, "\t-s: source IPv6 address\n");
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
+	fprintf(stderr, "\t-p: destination IPv6 prefix length\n");
 	fprintf(stderr, "\t-n: neighbor number (default:1)\n");
 	fprintf(stderr, "\t-t: time when packet is being transmitted (default:60)\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -p 64\n");
 
 	exit(0);
 }
@@ -246,6 +247,7 @@ init_ndperf_config(struct ndperf_config *nc)
 	nc->rx_sock = 0;
 	nc->neighbor_num = 0;
 	nc->expire_time = 0;
+	nc->prefixlen = 0;
 	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
 	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
 	memset(&nc->start_dstaddr, 0, sizeof(nc->start_dstaddr));
@@ -265,7 +267,7 @@ main(int argc, char *argv[])
 
 	init_ndperf_config(&conf);
 
-	while ((option = getopt(argc, argv, "hi:s:d:n:t:r:")) > 0) {
+	while ((option = getopt(argc, argv, "hi:s:d:p:n:t:r:")) > 0) {
 		switch(option) {
 		case 'h':
 			usage(prgname);
@@ -295,6 +297,9 @@ main(int argc, char *argv[])
 			}
 
 			break;
+		case 'p':
+			conf.prefixlen = atoi(optarg);
+			break;
 		case 'n':
 			conf.neighbor_num = atoi(optarg);
 			break;
@@ -317,6 +322,9 @@ main(int argc, char *argv[])
 	if (tx_if == 0 || rx_if == 0)
 		usage(prgname);
 
+	if (conf.prefixlen < 1 || conf.neighbor_num > 128)
+		usage(prgname);
+
 	if (conf.neighbor_num < 1 || conf.neighbor_num >= MAX_NODE_NUMBER)
 		conf.neighbor_num = DEFAULT_NEIGHBOR_NUM;
 
@@ -330,7 +338,8 @@ main(int argc, char *argv[])
 	}
 
 	// setup rx
-	if (create_virtual_interface(&conf.dstaddr, conf.neighbor_num, rx_if) < 0) {
+	if (create_virtual_interface(&conf.dstaddr, conf.prefixlen,
+				     conf.neighbor_num, rx_if) < 0) {
 		fprintf(stderr, "Unable to create interface\n");
 		return -1;
 	}

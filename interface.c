@@ -75,7 +75,8 @@ int set_address(char *ifname, struct in6_addr *addr, int prefixlen)
 }
 
 int
-create_virtual_interface(struct in6_addr *addr, int ifnum, char *ifname)
+create_virtual_interface(struct in6_addr *addr, int prefixlen,
+			 int ifnum, char *ifname)
 {
 	struct rtnl_link *link;
 	struct nl_cache *link_cache;
@@ -122,7 +123,7 @@ create_virtual_interface(struct in6_addr *addr, int ifnum, char *ifname)
 		}
 
 		increment_ipv6addr_plus_one(&setaddr);
-		if ((err = set_address(vif, &setaddr, 64)) < 0) {
+		if ((err = set_address(vif, &setaddr, prefixlen)) < 0) {
 			fprintf(stderr, "Unable to set address\n");
 			return err;
 		}
