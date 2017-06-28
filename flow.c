@@ -14,11 +14,10 @@ release_flow_hash()
 }
 
 void
-print_flow_hash(int node_num)
+print_flow_hash()
 {
         struct flow_counter *val;
 
-	printf("Neighbor number is %d\n", node_num);
         kh_foreach_value(h, val,
 	{
 		printf("\tDstaddr:%s\tSent:%lu\tReceived:%lu\n",
@@ -40,7 +39,7 @@ put_key_and_val_flow_hash(struct in6_addr *key, struct flow_counter *val)
 }
 
 void
-countup_val_flow_hash(struct in6_addr *key, int mode)
+countup_value_flow_hash(struct in6_addr *key, int mode)
 {
         struct flow_counter *val;
         khiter_t k;
@@ -56,4 +55,18 @@ countup_val_flow_hash(struct in6_addr *key, int mode)
 
 		kh_value(h, k) = val;
 	}
+}
+
+bool
+is_received_flow_hash()
+{
+	struct flow_counter *val;
+
+	kh_foreach_value(h, val,
+	{
+		if (val->received == 0)
+			return false;
+	);};
+
+	return true;
 }
