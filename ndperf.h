@@ -21,12 +21,18 @@
 
 #include "khash.h"
 
-#define DEFAULT_TIMER		60
+#define SCALING_TEST_TIMER	60
+#define BASELINE_TEST_TIMER	1800
+
 #define DEFAULT_NEIGHBOR_NUM	1
 #define MAX_NODE_NUMBER		8196
+
 #define	ADDRSTRLEN		48
 #define HASH_TX			1
 #define HASH_RX			2
+
+#define	BASELINE_TEST_MODE	1
+#define	SCALING_TEST_MODE	2
 
 struct flow_counter {
 	char addr_str[ADDRSTRLEN];
@@ -48,8 +54,8 @@ struct ndperf_config {
         int tx_sock;
         int rx_sock;
 
+        int mode;
         int neighbor_num;
-        int expire_time;
 
         struct in6_addr srcaddr;
         struct in6_addr dstaddr;
@@ -62,9 +68,10 @@ void increment_ipv6addr_plus_one(struct in6_addr *addr);
 /* flow */
 void init_flow_hash();
 void release_flow_hash();
-void print_flow_hash(int node_num);
+void print_flow_hash();
 void put_key_and_val_flow_hash(struct in6_addr *key, struct flow_counter *val);
-void countup_val_flow_hash(struct in6_addr *key, int mode);
+void countup_value_flow_hash(struct in6_addr *key, int mode);
+bool is_received_flow_hash();
 
 /* counter */
 struct fc_ptr * setup_flow_counter(struct in6_addr *addr, int node_num);

@@ -91,6 +91,7 @@ receive_thread(void *conf)
 
 	struct ndperf_config *nc = (struct ndperf_config *)conf;
 	int sock = nc->rx_sock;
+	int mode = nc->mode;
 	struct in6_addr dutaddr = nc->start_dstaddr;
 
 	for (;;) {
@@ -100,8 +101,12 @@ receive_thread(void *conf)
 		} else {
 			struct in6_addr *dstaddr = parse_rx_packet(buf, pktlen, &dutaddr);
 			if (dstaddr != NULL)
-				countup_val_flow_hash(dstaddr, HASH_RX);
+				countup_value_flow_hash(dstaddr, HASH_RX);
 		}
+
+		if (mode == SCALING_TEST_MODE)
+			if (is_received_flow_hash())
+				expired = true;
 	}
 }
 
@@ -121,12 +126,63 @@ cleanup_process(struct ndperf_config *nc)
 }
 
 static void
-process_packet(struct ndperf_config *nc)
+process_baseline_test(struct ndperf_config *nc)
 {
 	pthread_t rx_thread;
+	struct fc_ptr *fcp = NULL;
 
 	const struct itimerval timer = {
-		.it_value.tv_sec = nc->expire_time,
+		.it_value.tv_sec = BASELINE_TEST_TIMER,
+		.it_value.tv_usec = 0
+	};
+
+	// set counter
+	fcp = setup_flow_counter(&nc->dstaddr, nc->neighbor_num);
+	if (fcp == NULL) {
+		fprintf(stderr, "Unable to set flow counter\n");
+		exit(1);
+	}
+
+	// set timeout
+	setitimer(ITIMER_REAL, &timer, 0);
+
+	// create receive thread
+	if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
+	                  (void *)nc) != 0) {
+		perror("pthread_create");
+		exit(1);
+	}
+
+	increment_ipv6addr_plus_one(&nc->dstaddr);
+
+	for (;;) {
+		// send packet until timer expires
+		if (expired || caught_signal)
+			break;
+
+		if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
+			countup_value_flow_hash(&nc->dstaddr, HASH_TX);
+
+		usleep(50000);
+	}
+
+	// display stats of flow
+	print_flow_hash();
+
+	pthread_cancel(rx_thread);
+	pthread_join(rx_thread, NULL);
+
+	cleanup_flow_counter(fcp);
+}
+
+static int
+process_scaling_test(struct ndperf_config *nc)
+{
+	pthread_t rx_thread;
+	struct fc_ptr *fcp = NULL;
+
+	const struct itimerval timer = {
+		.it_value.tv_sec = SCALING_TEST_TIMER,
 		.it_value.tv_usec = 0
 	};
 
@@ -135,9 +191,9 @@ process_packet(struct ndperf_config *nc)
 		.it_value.tv_usec = 0
 	};
 
-	for (int node = 1; node <= nc->neighbor_num; node++) {
+	for (int test_index = 1; test_index <= nc->neighbor_num; test_index++) {
 		// set counter
-		struct fc_ptr *fcp = setup_flow_counter(&nc->dstaddr, node);
+		fcp = setup_flow_counter(&nc->dstaddr, test_index);
 		if (fcp == NULL) {
 			fprintf(stderr, "Unable to set flow counter\n");
 			exit(1);
@@ -153,43 +209,54 @@ process_packet(struct ndperf_config *nc)
 			exit(1);
 		}
 
-		for (int count = 1; count <= node; count++) {
-			// send packet until timer expires
+		for (int cur_node = 1; cur_node <= test_index; cur_node++) {
 			if (expired || caught_signal)
 				break;
 
 			increment_ipv6addr_plus_one(&nc->dstaddr);
 
 			if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
-				countup_val_flow_hash(&nc->dstaddr, HASH_TX);
+				countup_value_flow_hash(&nc->dstaddr, HASH_TX);
 
 			// stop increment, from begining
-			if (count == node) {
-				count = 0;
+			if (cur_node == test_index) {
+				cur_node = 0;
 				nc->dstaddr = nc->start_dstaddr;
 			}
 
 			usleep(50000);
 		}
 
-		// display stats of flow
-		print_flow_hash(node);
+		// failed case
+		if (!is_received_flow_hash()) {
+			printf("\nTest of %d neighbor is not passed\n", test_index);
+			print_flow_hash();
+			goto test_fail;
+		}
 
 		// stop timeout
 		setitimer(ITIMER_REAL, &stop, 0);
 		expired = false;
+
+		printf("\nTest of %d neighbor is passed\n", test_index);
+		print_flow_hash();
 
 		pthread_cancel(rx_thread);
 		pthread_join(rx_thread, NULL);
 
 		cleanup_flow_counter(fcp);
 		nc->dstaddr = nc->start_dstaddr;
-
-		if (caught_signal)
-			break;
 	}
 
-	cleanup_process(nc);
+	return 0;
+
+test_fail:
+	pthread_cancel(rx_thread);
+	pthread_join(rx_thread, NULL);
+
+	cleanup_flow_counter(fcp);
+
+	return -1;
 }
 
 static void
@@ -226,16 +293,19 @@ static void
 usage(char *prgname)
 {
 	fprintf(stderr, "usage:\t%s\n", prgname);
+	fprintf(stderr, "\t-B: Baseline test mode\n");
+	fprintf(stderr, "\t-S: Scaling test mode\n");
+	fprintf(stderr, "\n");
 	fprintf(stderr, "\t-i: interface(source)\n");
 	fprintf(stderr, "\t-r: interface(destination)\n");
 	fprintf(stderr, "\t-s: source IPv6 address\n");
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
 	fprintf(stderr, "\t-p: destination IPv6 prefix length\n");
 	fprintf(stderr, "\t-n: neighbor number (default:1)\n");
-	fprintf(stderr, "\t-t: time when packet is being transmitted (default:60)\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "\te.g: sudo ./ndperf -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -p 64\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -B -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -p 64\n");
+	fprintf(stderr, "\te.g: sudo ./ndperf -S -n 1000 -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -p 64\n");
 
 	exit(0);
 }
@@ -245,8 +315,8 @@ init_ndperf_config(struct ndperf_config *nc)
 {
 	nc->tx_sock = 0;
 	nc->rx_sock = 0;
+	nc->mode = 0;
 	nc->neighbor_num = 0;
-	nc->expire_time = 0;
 	nc->prefixlen = 0;
 	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
 	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
@@ -267,8 +337,14 @@ main(int argc, char *argv[])
 
 	init_ndperf_config(&conf);
 
-	while ((option = getopt(argc, argv, "hi:s:d:p:n:t:r:")) > 0) {
+	while ((option = getopt(argc, argv, "hSBi:s:d:p:n:t:r:")) > 0) {
 		switch(option) {
+		case 'B':
+			conf.mode = BASELINE_TEST_MODE;
+			break;
+		case 'S':
+			conf.mode = SCALING_TEST_MODE;
+			break;
 		case 'h':
 			usage(prgname);
 			break;
@@ -303,9 +379,6 @@ main(int argc, char *argv[])
 		case 'n':
 			conf.neighbor_num = atoi(optarg);
 			break;
-		case 't':
-			conf.expire_time = atoi(optarg);
-			break;
 		default:
 			usage(prgname);
 		}
@@ -319,17 +392,20 @@ main(int argc, char *argv[])
 		usage(prgname);
 	}
 
+	if (conf.mode == 0)
+		conf.mode = BASELINE_TEST_MODE;
+
 	if (tx_if == 0 || rx_if == 0)
 		usage(prgname);
 
 	if (conf.prefixlen < 1 || conf.neighbor_num > 128)
 		usage(prgname);
 
-	if (conf.neighbor_num < 1 || conf.neighbor_num >= MAX_NODE_NUMBER)
+	if (conf.mode == BASELINE_TEST_MODE)
 		conf.neighbor_num = DEFAULT_NEIGHBOR_NUM;
 
-	if (conf.expire_time < 1)
-		conf.expire_time = DEFAULT_TIMER;
+	if (conf.neighbor_num < 1 || conf.neighbor_num >= MAX_NODE_NUMBER)
+		conf.neighbor_num = DEFAULT_NEIGHBOR_NUM;
 
 	// setup tx
 	if ((conf.tx_sock = init_tx_socket(tx_if)) < 0) {
@@ -353,7 +429,22 @@ main(int argc, char *argv[])
 	set_timeout_signal(SIGALRM);
 
 	/* main process */
-	process_packet(&conf);
+	if (conf.mode == BASELINE_TEST_MODE) {
+		printf("Started prewarming test...\n");
+
+		if (process_scaling_test(&conf) < 0) {
+			cleanup_process(&conf);
+			return -1;
+		}
+
+		printf("\nStarted baseline test for %d seconds...\n", BASELINE_TEST_TIMER);
+		process_baseline_test(&conf);
+	} else if (conf.mode == SCALING_TEST_MODE) {
+		printf("Started scaling test...\n");
+		process_scaling_test(&conf);
+	}
+
+	cleanup_process(&conf);
 
 	return 0;
 }
