@@ -191,7 +191,8 @@ process_baseline_test(struct ndperf_config *nc)
 	print_flow_hash();
 
 	if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
-		fprintf(stderr, "Unable to create interface name\n");
+		fprintf(stderr, "Unable to cleanup rx thread\n");
+		cleanup_flow_counter(fcp);
 		return ret;
 	}
 
@@ -268,7 +269,8 @@ process_scaling_test(struct ndperf_config *nc)
 		print_flow_hash();
 
 		if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
-			fprintf(stderr, "Unable to create interface name\n");
+			fprintf(stderr, "Unable to cleanup rx thread\n");
+			cleanup_flow_counter(fcp);
 			return ret;
 		}
 
@@ -280,7 +282,8 @@ process_scaling_test(struct ndperf_config *nc)
 
 cleanup:
 	if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
-		fprintf(stderr, "Unable to create interface name\n");
+		fprintf(stderr, "Unable to cleanup rx thread\n");
+		cleanup_flow_counter(fcp);
 		return ret;
 	}
 
