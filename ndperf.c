@@ -125,11 +125,32 @@ cleanup_process(struct ndperf_config *nc)
         close(nc->rx_sock);
 }
 
-static void
+static int
+cleanup_receive_thread(pthread_t th)
+{
+	int err;
+
+	err = pthread_cancel(th);
+	if (err < 0) {
+		perror("pthread_cancel");
+		return err;
+	}
+
+	err = pthread_join(th, NULL);
+	if (err < 0) {
+		perror("pthread_join");
+		return err;
+	}
+
+	return 0;
+}
+
+static int
 process_baseline_test(struct ndperf_config *nc)
 {
 	pthread_t rx_thread;
 	struct fc_ptr *fcp = NULL;
+	int ret;
 
 	const struct itimerval timer = {
 		.it_value.tv_sec = BASELINE_TEST_TIMER,
@@ -169,10 +190,14 @@ process_baseline_test(struct ndperf_config *nc)
 	// display stats of flow
 	print_flow_hash();
 
-	pthread_cancel(rx_thread);
-	pthread_join(rx_thread, NULL);
+	if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
+		fprintf(stderr, "Unable to create interface name\n");
+		return ret;
+	}
 
 	cleanup_flow_counter(fcp);
+
+	return 0;
 }
 
 static int
@@ -180,6 +205,7 @@ process_scaling_test(struct ndperf_config *nc)
 {
 	pthread_t rx_thread;
 	struct fc_ptr *fcp = NULL;
+	int ret;
 
 	const struct itimerval timer = {
 		.it_value.tv_sec = SCALING_TEST_TIMER,
@@ -231,7 +257,7 @@ process_scaling_test(struct ndperf_config *nc)
 		if (!is_received_flow_hash()) {
 			printf("\nTest of %d neighbor is not passed\n", test_index);
 			print_flow_hash();
-			goto test_fail;
+			goto cleanup;
 		}
 
 		// stop timeout
@@ -241,8 +267,10 @@ process_scaling_test(struct ndperf_config *nc)
 		printf("\nTest of %d neighbor is passed\n", test_index);
 		print_flow_hash();
 
-		pthread_cancel(rx_thread);
-		pthread_join(rx_thread, NULL);
+		if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
+			fprintf(stderr, "Unable to create interface name\n");
+			return ret;
+		}
 
 		cleanup_flow_counter(fcp);
 		nc->dstaddr = nc->start_dstaddr;
@@ -250,9 +278,11 @@ process_scaling_test(struct ndperf_config *nc)
 
 	return 0;
 
-test_fail:
-	pthread_cancel(rx_thread);
-	pthread_join(rx_thread, NULL);
+cleanup:
+	if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
+		fprintf(stderr, "Unable to create interface name\n");
+		return ret;
+	}
 
 	cleanup_flow_counter(fcp);
 
