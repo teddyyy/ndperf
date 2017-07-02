@@ -58,7 +58,7 @@ parse_rx_packet(unsigned char *pkt, int len, struct in6_addr *dutaddr)
 	pkt += sizeof(struct ether_header);
 	ip6 = (struct ip6_hdr *)pkt;
 
-	if (!addr6_eq(&ip6->ip6_src, dutaddr) || ip6->ip6_nxt != 58)
+	if (!addr6_eq(&ip6->ip6_src, dutaddr) || ip6->ip6_nxt != 59)
 		return NULL;
 
 	dstaddr = &ip6->ip6_dst;
