@@ -39,7 +39,7 @@ static inline uint32_t addr6_eq(const struct in6_addr *a,
 }
 
 static struct in6_addr *
-parse_rx_packet(unsigned char *pkt, int len, struct in6_addr *dutaddr)
+parse_rx_packet(unsigned char *pkt, int len, struct in6_addr *srcaddr)
 {
 	struct ether_header *ether;
 	struct ip6_hdr *ip6;
@@ -58,7 +58,7 @@ parse_rx_packet(unsigned char *pkt, int len, struct in6_addr *dutaddr)
 	pkt += sizeof(struct ether_header);
 	ip6 = (struct ip6_hdr *)pkt;
 
-	if (!addr6_eq(&ip6->ip6_src, dutaddr) || ip6->ip6_nxt != 59)
+	if (!addr6_eq(&ip6->ip6_src, srcaddr) || ip6->ip6_nxt != 59)
 		return NULL;
 
 	dstaddr = &ip6->ip6_dst;
@@ -92,14 +92,14 @@ receive_thread(void *conf)
 	struct ndperf_config *nc = (struct ndperf_config *)conf;
 	int sock = nc->rx_sock;
 	int mode = nc->mode;
-	struct in6_addr dutaddr = nc->start_dstaddr;
+	struct in6_addr srcaddr = nc->srcaddr;
 
 	for (;;) {
 		int pktlen = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
 		if (pktlen < 0) {
 			perror("recvfrom");
 		} else {
-			struct in6_addr *dstaddr = parse_rx_packet(buf, pktlen, &dutaddr);
+			struct in6_addr *dstaddr = parse_rx_packet(buf, pktlen, &srcaddr);
 			if (dstaddr != NULL)
 				countup_value_flow_hash(dstaddr, HASH_RX);
 		}
