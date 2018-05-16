@@ -431,7 +431,7 @@ main(int argc, char *argv[])
 	if (tx_if == 0 || rx_if == 0)
 		usage(prgname);
 
-	if (conf.prefixlen < 1 || conf.neighbor_num > 128)
+	if (conf.prefixlen < 1 || conf.prefixlen > 128)
 		usage(prgname);
 
 	if (conf.mode == BASELINE_TEST_MODE)
