@@ -91,7 +91,6 @@ receive_thread(void *conf)
 
 	struct ndperf_config *nc = (struct ndperf_config *)conf;
 	int sock = nc->rx_sock;
-	int mode = nc->mode;
 	struct in6_addr srcaddr = nc->srcaddr;
 
 	for (;;) {
@@ -103,12 +102,29 @@ receive_thread(void *conf)
 			if (dstaddr != NULL)
 				countup_value_flow_hash(dstaddr, HASH_RX);
 		}
-
-		if (mode == SCALING_TEST_MODE)
-			if (is_received_flow_hash())
-				expired = true;
 	}
 }
+
+static void
+transmit_thread(void *conf)
+{
+	struct ndperf_config *nc = (struct ndperf_config *)conf;
+
+	for (int cur_node = 1; cur_node <= nc->test_index; cur_node++) {
+
+		increment_ipv6addr_plus_one(&nc->dstaddr);
+
+		if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
+			countup_value_flow_hash(&nc->dstaddr, HASH_TX);
+
+		// stop increment, from begining
+		if (cur_node == nc->test_index) {
+			cur_node = 0;
+			nc->dstaddr = nc->start_dstaddr;
+		}
+	}
+}
+
 
 static void
 cleanup_process(struct ndperf_config *nc)
@@ -126,7 +142,7 @@ cleanup_process(struct ndperf_config *nc)
 }
 
 static int
-cleanup_receive_thread(pthread_t th)
+cleanup_thread(pthread_t th)
 {
 	int err;
 
@@ -148,7 +164,7 @@ cleanup_receive_thread(pthread_t th)
 static int
 process_baseline_test(struct ndperf_config *nc)
 {
-	pthread_t rx_thread;
+	pthread_t rx_thread, tx_thread;
 	struct fc_ptr *fcp = NULL;
 	int ret;
 
@@ -156,6 +172,10 @@ process_baseline_test(struct ndperf_config *nc)
 		.it_value.tv_sec = BASELINE_TEST_TIMER,
 		.it_value.tv_usec = 0
 	};
+
+	// set index
+	nc->test_index = 1;
+
 
 	// set counter
 	fcp = setup_flow_counter(&nc->dstaddr, nc->neighbor_num);
@@ -174,24 +194,34 @@ process_baseline_test(struct ndperf_config *nc)
 		exit(1);
 	}
 
-	increment_ipv6addr_plus_one(&nc->dstaddr);
+	// create transmit thread
+	if (pthread_create(&tx_thread, NULL, (void *)transmit_thread,
+	                  (void *)nc) != 0) {
+		perror("pthread_create");
+		exit(1);
+	}
 
 	for (;;) {
-		// send packet until timer expires
 		if (expired || caught_signal)
 			break;
 
-		if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
-			countup_value_flow_hash(&nc->dstaddr, HASH_TX);
+		if (is_received_flow_hash())
+			break;
 
-		usleep(50000);
+		usleep(5000);
 	}
 
 	// display stats of flow
 	print_flow_hash();
 
-	if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
+	if ((ret = cleanup_thread(rx_thread)) < 0) {
 		fprintf(stderr, "Unable to cleanup rx thread\n");
+		cleanup_flow_counter(fcp);
+		return ret;
+	}
+
+	if ((ret = cleanup_thread(tx_thread)) < 0) {
+		fprintf(stderr, "Unable to cleanup tx thread\n");
 		cleanup_flow_counter(fcp);
 		return ret;
 	}
@@ -204,7 +234,7 @@ process_baseline_test(struct ndperf_config *nc)
 static int
 process_scaling_test(struct ndperf_config *nc)
 {
-	pthread_t rx_thread;
+	pthread_t rx_thread, tx_thread;
 	struct fc_ptr *fcp = NULL;
 	int ret;
 
@@ -219,6 +249,9 @@ process_scaling_test(struct ndperf_config *nc)
 	};
 
 	for (int test_index = 1; test_index <= nc->neighbor_num; test_index++) {
+		// set index
+		nc->test_index = test_index;
+
 		// set counter
 		fcp = setup_flow_counter(&nc->dstaddr, test_index);
 		if (fcp == NULL) {
@@ -236,22 +269,21 @@ process_scaling_test(struct ndperf_config *nc)
 			exit(1);
 		}
 
-		for (int cur_node = 1; cur_node <= test_index; cur_node++) {
+		// create transmit thread
+		if (pthread_create(&tx_thread, NULL, (void *)transmit_thread,
+		                  (void *)nc) != 0) {
+			perror("pthread_create");
+			exit(1);
+		}
+
+		while (1) {
 			if (expired || caught_signal)
 				break;
 
-			increment_ipv6addr_plus_one(&nc->dstaddr);
+			if (is_received_flow_hash())
+				break;
 
-			if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
-				countup_value_flow_hash(&nc->dstaddr, HASH_TX);
-
-			// stop increment, from begining
-			if (cur_node == test_index) {
-				cur_node = 0;
-				nc->dstaddr = nc->start_dstaddr;
-			}
-
-			usleep(50000);
+			usleep(5000);
 		}
 
 		// failed case
@@ -265,11 +297,17 @@ process_scaling_test(struct ndperf_config *nc)
 		setitimer(ITIMER_REAL, &stop, 0);
 		expired = false;
 
-		printf("\nTest of %d neighbor is passed\n", test_index);
+		printf("Test of %d neighbor is passed\n", test_index);
 		print_flow_hash();
 
-		if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
+		if ((ret = cleanup_thread(rx_thread)) < 0) {
 			fprintf(stderr, "Unable to cleanup rx thread\n");
+			cleanup_flow_counter(fcp);
+			return ret;
+		}
+
+		if ((ret = cleanup_thread(tx_thread)) < 0) {
+			fprintf(stderr, "Unable to cleanup tx thread\n");
 			cleanup_flow_counter(fcp);
 			return ret;
 		}
@@ -281,8 +319,14 @@ process_scaling_test(struct ndperf_config *nc)
 	return 0;
 
 cleanup:
-	if ((ret = cleanup_receive_thread(rx_thread)) < 0) {
+	if ((ret = cleanup_thread(rx_thread)) < 0) {
 		fprintf(stderr, "Unable to cleanup rx thread\n");
+		cleanup_flow_counter(fcp);
+		return ret;
+	}
+
+	if ((ret = cleanup_thread(tx_thread)) < 0) {
+		fprintf(stderr, "Unable to cleanup tx thread\n");
 		cleanup_flow_counter(fcp);
 		return ret;
 	}
@@ -350,6 +394,7 @@ init_ndperf_config(struct ndperf_config *nc)
 	nc->rx_sock = 0;
 	nc->mode = 0;
 	nc->neighbor_num = 0;
+	nc->test_index = 0;
 	nc->prefixlen = 0;
 	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
 	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
@@ -471,10 +516,17 @@ main(int argc, char *argv[])
 		}
 
 		printf("\nStarted baseline test for %d seconds...\n", BASELINE_TEST_TIMER);
-		process_baseline_test(&conf);
+
+		if (process_baseline_test(&conf) < 0) {
+			cleanup_process(&conf);
+			return -1;
+		}
 	} else if (conf.mode == SCALING_TEST_MODE) {
 		printf("Started scaling test...\n");
-		process_scaling_test(&conf);
+		if (process_scaling_test(&conf) < 0) {
+			cleanup_process(&conf);
+			return -1;
+		}
 	}
 
 	cleanup_process(&conf);

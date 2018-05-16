@@ -56,6 +56,7 @@ struct ndperf_config {
 
         int mode;
         int neighbor_num;
+        int test_index;
 
         struct in6_addr srcaddr;
         struct in6_addr dstaddr;
