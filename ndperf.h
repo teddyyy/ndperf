@@ -58,6 +58,8 @@ struct ndperf_config {
         int neighbor_num;
         int test_index;
 
+	bool verbose;
+
         struct in6_addr srcaddr;
         struct in6_addr dstaddr;
         struct in6_addr start_dstaddr;
@@ -73,6 +75,7 @@ void print_flow_hash();
 void put_key_and_val_flow_hash(struct in6_addr *key, struct flow_counter *val);
 void countup_value_flow_hash(struct in6_addr *key, int mode);
 bool is_received_flow_hash();
+bool is_equal_received_flow_hash(struct in6_addr *key);
 
 /* counter */
 struct fc_ptr * setup_flow_counter(struct in6_addr *addr, int node_num);

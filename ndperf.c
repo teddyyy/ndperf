@@ -14,6 +14,13 @@ increment_ipv6addr_plus_one(struct in6_addr *addr)
 	while (i > 0 && !addr->s6_addr[i--]) addr->s6_addr[i]++;
 }
 
+static double gettimeofday_sec()
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec + tv.tv_usec * 1e-6;
+}
+
 static void
 build_ipv6_pkt(char *pkt, struct in6_addr *src, struct in6_addr *dst)
 {
@@ -122,6 +129,10 @@ transmit_thread(void *conf)
 			cur_node = 0;
 			nc->dstaddr = nc->start_dstaddr;
 		}
+
+
+		if (nc->mode == BASELINE_TEST_MODE)
+			usleep(10000);
 	}
 }
 
@@ -166,6 +177,7 @@ process_baseline_test(struct ndperf_config *nc)
 {
 	pthread_t rx_thread, tx_thread;
 	struct fc_ptr *fcp = NULL;
+	struct in6_addr dstaddr = nc->dstaddr;
 	int ret;
 
 	const struct itimerval timer = {
@@ -204,12 +216,14 @@ process_baseline_test(struct ndperf_config *nc)
 	for (;;) {
 		if (expired || caught_signal)
 			break;
-
-		if (is_received_flow_hash())
-			break;
-
-		usleep(5000);
 	}
+
+	increment_ipv6addr_plus_one(&dstaddr);
+
+	if (!is_equal_received_flow_hash(&dstaddr) || caught_signal)
+		printf("Baseline test is not passed\n");
+	else
+		printf("Baseline test is passed\n");
 
 	// display stats of flow
 	print_flow_hash();
@@ -236,6 +250,7 @@ process_scaling_test(struct ndperf_config *nc)
 {
 	pthread_t rx_thread, tx_thread;
 	struct fc_ptr *fcp = NULL;
+	double start, end;
 	int ret;
 
 	const struct itimerval timer = {
@@ -261,6 +276,7 @@ process_scaling_test(struct ndperf_config *nc)
 
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
+		start = gettimeofday_sec();
 
 		// create receive thread
 		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
@@ -282,23 +298,15 @@ process_scaling_test(struct ndperf_config *nc)
 
 			if (is_received_flow_hash())
 				break;
-
-			usleep(5000);
-		}
-
-		// failed case
-		if (!is_received_flow_hash()) {
-			printf("\nTest of %d neighbor is not passed\n", test_index);
-			print_flow_hash();
-			goto cleanup;
 		}
 
 		// stop timeout
 		setitimer(ITIMER_REAL, &stop, 0);
 		expired = false;
+		end = gettimeofday_sec();
 
-		printf("Test of %d neighbor is passed\n", test_index);
-		print_flow_hash();
+		if (nc->verbose)
+			print_flow_hash();
 
 		if ((ret = cleanup_thread(rx_thread)) < 0) {
 			fprintf(stderr, "Unable to cleanup rx thread\n");
@@ -312,28 +320,22 @@ process_scaling_test(struct ndperf_config *nc)
 			return ret;
 		}
 
+		// failed case
+		if (!is_received_flow_hash()) {
+			printf("Test of %d neighbor isn't passed. It took %f seconds.\n",
+				test_index, end - start);
+			cleanup_flow_counter(fcp);
+			return -1;
+		}
+
+		printf("Test of %d neighbor is passed. It took %f seconds.\n",
+			test_index, end - start);
+
 		cleanup_flow_counter(fcp);
 		nc->dstaddr = nc->start_dstaddr;
 	}
 
 	return 0;
-
-cleanup:
-	if ((ret = cleanup_thread(rx_thread)) < 0) {
-		fprintf(stderr, "Unable to cleanup rx thread\n");
-		cleanup_flow_counter(fcp);
-		return ret;
-	}
-
-	if ((ret = cleanup_thread(tx_thread)) < 0) {
-		fprintf(stderr, "Unable to cleanup tx thread\n");
-		cleanup_flow_counter(fcp);
-		return ret;
-	}
-
-	cleanup_flow_counter(fcp);
-
-	return -1;
 }
 
 static void
@@ -379,6 +381,7 @@ usage(char *prgname)
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
 	fprintf(stderr, "\t-p: destination IPv6 prefix length\n");
 	fprintf(stderr, "\t-n: neighbor number (default:1)\n");
+	fprintf(stderr, "\t-v: verbose output\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "\te.g: sudo ./ndperf -B -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -p 64\n");
@@ -396,6 +399,7 @@ init_ndperf_config(struct ndperf_config *nc)
 	nc->neighbor_num = 0;
 	nc->test_index = 0;
 	nc->prefixlen = 0;
+	nc->verbose = false;
 	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
 	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
 	memset(&nc->start_dstaddr, 0, sizeof(nc->start_dstaddr));
@@ -415,7 +419,7 @@ main(int argc, char *argv[])
 
 	init_ndperf_config(&conf);
 
-	while ((option = getopt(argc, argv, "hSBi:s:d:p:n:t:r:")) > 0) {
+	while ((option = getopt(argc, argv, "hSBvi:s:d:p:n:t:r:")) > 0) {
 		switch(option) {
 		case 'B':
 			conf.mode = BASELINE_TEST_MODE;
@@ -456,6 +460,9 @@ main(int argc, char *argv[])
 			break;
 		case 'n':
 			conf.neighbor_num = atoi(optarg);
+			break;
+		case 'v':
+			conf.verbose = true;
 			break;
 		default:
 			usage(prgname);
@@ -508,21 +515,23 @@ main(int argc, char *argv[])
 
 	/* main process */
 	if (conf.mode == BASELINE_TEST_MODE) {
-		printf("Started prewarming test...\n");
+		conf.neighbor_num = 1;
+
+		printf("Started prewarming test...\n\n");
 
 		if (process_scaling_test(&conf) < 0) {
 			cleanup_process(&conf);
 			return -1;
 		}
 
-		printf("\nStarted baseline test for %d seconds...\n", BASELINE_TEST_TIMER);
+		printf("\nStarted baseline test for %d seconds...\n\n", BASELINE_TEST_TIMER);
 
 		if (process_baseline_test(&conf) < 0) {
 			cleanup_process(&conf);
 			return -1;
 		}
 	} else if (conf.mode == SCALING_TEST_MODE) {
-		printf("Started scaling test...\n");
+		printf("Started scaling test...\n\n");
 		if (process_scaling_test(&conf) < 0) {
 			cleanup_process(&conf);
 			return -1;

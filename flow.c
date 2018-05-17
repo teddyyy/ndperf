@@ -20,7 +20,7 @@ print_flow_hash()
 
         kh_foreach_value(h, val,
 	{
-		printf("\tDstaddr:%s\tSent:%lu\tReceived:%lu\n",
+		printf("Dstaddr:%s\tSent:%lu\tReceived:%lu\n",
 		       val->addr_str, val->sent, val->received));
 	};
 }
@@ -69,4 +69,22 @@ is_received_flow_hash()
 	);};
 
 	return true;
+}
+
+bool
+is_equal_received_flow_hash(struct in6_addr *key)
+{
+	struct flow_counter *val;
+	khiter_t k;
+
+	k = kh_get(flow_hash_t, h, addr6_hash(key));
+        if (k != kh_end(h)) {
+                val = kh_value(h, k);
+
+		if ((val->sent == val->received) &&
+		    (val->sent != 0) && (val->received != 0))
+			return true;
+	}
+
+	return false;
 }
