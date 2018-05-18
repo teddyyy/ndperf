@@ -219,3 +219,41 @@ init_rx_socket(int ifnum)
 
 	return sock;
 }
+
+int
+get_tx_link_speed(char *ifname)
+{
+	int sock, ret;
+	struct ifreq ifr;
+	struct ethtool_cmd e;
+
+	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock < 0) {
+		perror("socket");
+		return -1;
+	}
+
+	strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+	ifr.ifr_data = (caddr_t)&e;
+
+	e.cmd = ETHTOOL_GSET;
+
+	ret = ioctl(sock, SIOCETHTOOL, &ifr);
+	if (ret < 0) {
+		perror("ioctl");
+		return ret;
+	}
+
+	switch (ethtool_cmd_speed(&e)) {
+		case SPEED_10: ret = 10; break;
+		case SPEED_100: ret = 100; break;
+		case SPEED_1000: ret = 1000; break;
+		case SPEED_2500: ret = 2500; break;
+		case SPEED_10000: ret = 10000; break;
+		default: fprintf(stderr, "Link Speed returned is %d\n", e.speed); ret = -1;
+	}
+
+	close(sock);
+
+	return ret;
+}

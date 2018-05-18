@@ -21,6 +21,27 @@ static double gettimeofday_sec()
 	return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
+static inline long
+get_threshold_pps_by_speed_link(int speed)
+{
+	long pps;
+
+	/*
+         rfc8161
+
+         2.2.4.  Test Traffic
+
+	 In order to avoid link congestion, test traffic is offered at a rate
+         not to exceed 50% of available link bandwidth.  In order to avoid
+         burstiness and buffer occupancy, every packet in the stream is
+         exactly 40 bytes long (i.e., the length of an IPv6 header with no
+         IPv6 payload).
+         */
+
+	return pps = speed * 1e+6 / 2 / 8 / 60;
+}
+
+
 static void
 build_ipv6_pkt(char *pkt, struct in6_addr *src, struct in6_addr *dst)
 {
@@ -118,7 +139,6 @@ transmit_thread(void *conf)
 	struct ndperf_config *nc = (struct ndperf_config *)conf;
 
 	for (int cur_node = 1; cur_node <= nc->test_index; cur_node++) {
-
 		increment_ipv6addr_plus_one(&nc->dstaddr);
 
 		if (tx_packet(nc->tx_sock, &nc->srcaddr, &nc->dstaddr) != -1)
@@ -199,14 +219,12 @@ process_baseline_test(struct ndperf_config *nc)
 	// set timeout
 	setitimer(ITIMER_REAL, &timer, 0);
 
-	// create receive thread
 	if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
 	                  (void *)nc) != 0) {
 		perror("pthread_create");
 		exit(1);
 	}
 
-	// create transmit thread
 	if (pthread_create(&tx_thread, NULL, (void *)transmit_thread,
 	                  (void *)nc) != 0) {
 		perror("pthread_create");
@@ -278,14 +296,12 @@ process_scaling_test(struct ndperf_config *nc)
 		setitimer(ITIMER_REAL, &timer, 0);
 		start = gettimeofday_sec();
 
-		// create receive thread
 		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
 		                  (void *)nc) != 0) {
 			perror("pthread_create");
 			exit(1);
 		}
 
-		// create transmit thread
 		if (pthread_create(&tx_thread, NULL, (void *)transmit_thread,
 		                  (void *)nc) != 0) {
 			perror("pthread_create");
@@ -400,6 +416,7 @@ init_ndperf_config(struct ndperf_config *nc)
 	nc->test_index = 0;
 	nc->prefixlen = 0;
 	nc->verbose = false;
+	nc->threshold_pps = 0;
 	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
 	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
 	memset(&nc->start_dstaddr, 0, sizeof(nc->start_dstaddr));
@@ -412,7 +429,7 @@ main(int argc, char *argv[])
 	struct ndperf_config conf;
 
 	// for option
-	int option;
+	int option, link_speed;
 	char *tx_if = 0, *rx_if = 0;
 
 	prgname = argv[0];
@@ -491,6 +508,14 @@ main(int argc, char *argv[])
 
 	if (conf.neighbor_num < 1 || conf.neighbor_num >= MAX_NODE_NUMBER)
 		conf.neighbor_num = DEFAULT_NEIGHBOR_NUM;
+
+	if ((link_speed = get_tx_link_speed(tx_if)) < 0) {
+		fprintf(stderr, "Unable to get tx link speed\n");
+		return -1;
+	}
+
+	conf.threshold_pps = get_threshold_pps_by_speed_link(link_speed);
+	printf("%ld\n", conf.threshold_pps);
 
 	// setup tx
 	if ((conf.tx_sock = init_tx_socket(tx_if)) < 0) {

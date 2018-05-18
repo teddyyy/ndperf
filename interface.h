@@ -6,7 +6,10 @@
 #include <netlink/route/link/macvlan.h>
 
 #include <linux/netlink.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
 
+#include <netinet/in.h>
 #include <sys/ioctl.h>
 
 #endif

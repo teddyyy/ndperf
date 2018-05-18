@@ -64,6 +64,8 @@ struct ndperf_config {
         struct in6_addr dstaddr;
         struct in6_addr start_dstaddr;
         int prefixlen;
+
+	long threshold_pps;
 };
 
 void increment_ipv6addr_plus_one(struct in6_addr *addr);
@@ -72,7 +74,7 @@ void increment_ipv6addr_plus_one(struct in6_addr *addr);
 void init_flow_hash();
 void release_flow_hash();
 void print_flow_hash();
-void put_key_and_val_flow_hash(struct in6_addr *key, struct flow_counter *val);
+void put_key_and_value_flow_hash(struct in6_addr *key, struct flow_counter *val);
 void countup_value_flow_hash(struct in6_addr *key, int mode);
 bool is_received_flow_hash();
 bool is_equal_received_flow_hash(struct in6_addr *key);
@@ -86,5 +88,6 @@ int create_virtual_interface(struct in6_addr *addr, int prefixlen, int dstnum, c
 int delete_virtual_interface(int ifnum);
 int init_tx_socket(char *ifname);
 int init_rx_socket(int ifnum);
+int get_tx_link_speed(char *ifname);
 
 #endif

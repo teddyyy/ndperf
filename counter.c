@@ -55,7 +55,7 @@ setup_flow_counter(struct in6_addr *addr, int node_num)
 		}
 
                 // insert key and value
-                put_key_and_val_flow_hash(&fcp->keys[i], fcp->val);
+                put_key_and_value_flow_hash(&fcp->keys[i], fcp->val);
         }
 
         return fcp;

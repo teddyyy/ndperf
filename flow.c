@@ -26,7 +26,7 @@ print_flow_hash()
 }
 
 void
-put_key_and_val_flow_hash(struct in6_addr *key, struct flow_counter *val)
+put_key_and_value_flow_hash(struct in6_addr *key, struct flow_counter *val)
 {
         int ret;
         khiter_t k;
