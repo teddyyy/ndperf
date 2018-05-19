@@ -5,7 +5,7 @@ static int
 create_virtual_interface_name(char *ifname, int ifname_len, int num)
 {
 	int err;
-	char ifindex[4] = "";
+	char ifindex[8] = "";
 
 	err = snprintf(ifindex, sizeof(ifindex), "%d", num);
 	if (err < 0) {
@@ -82,7 +82,7 @@ create_virtual_interface(struct in6_addr *addr, int prefixlen,
 	struct nl_cache *link_cache;
 	struct nl_sock *sock;
 	int err, master_index;
-	char vif[8] = "";
+	char vif[16] = "";
 	struct in6_addr setaddr;
 
 	memcpy(&setaddr, addr, sizeof(struct in6_addr));
@@ -147,7 +147,7 @@ delete_virtual_interface(int ifnum)
 	struct rtnl_link *link;
 	struct nl_sock *sock;
 	int err;
-	char vif[8] = "";
+	char vif[16] = "";
 
 	sock = nl_socket_alloc();
 	if ((err = nl_connect(sock, NETLINK_ROUTE)) < 0) {
@@ -199,7 +199,7 @@ int
 init_rx_socket(int ifnum)
 {
 	int sock, err;
-	char vif[8] = "";
+	char vif[16] = "";
 
 	if ((sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IPV6))) < 0) {
                 perror("socket");
@@ -256,4 +256,25 @@ get_tx_link_speed(char *ifname)
 	close(sock);
 
 	return ret;
+}
+
+long get_packet_count(char *filepath)
+{
+	int fd;
+	char buf[48];
+
+	fd = open(filepath, O_RDONLY);
+	if (fd == -1) {
+		perror("open");
+		return -1;
+	}
+
+	if (read(fd, buf, sizeof(buf)) == -1) {
+		perror("read");
+		return -1;
+	}
+
+	close(fd);
+
+	return atol(buf);
 }

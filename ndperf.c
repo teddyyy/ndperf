@@ -14,7 +14,7 @@ increment_ipv6addr_plus_one(struct in6_addr *addr)
 	while (i > 0 && !addr->s6_addr[i--]) addr->s6_addr[i]++;
 }
 
-static double gettimeofday_sec()
+static double get_timeofday_sec()
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
@@ -38,7 +38,20 @@ get_threshold_pps_by_speed_link(int speed)
          IPv6 payload).
          */
 
+	// pps = link speed * to bit order / 50% / convert to byte / packet size
 	return pps = speed * 1e+6 / 2 / 8 / 60;
+}
+
+static void
+create_file_path(char *ifname, int ifname_len, char *path)
+{
+        char str1[] = "/sys/class/net/";
+        strncat(str1, ifname, ifname_len);
+
+        memcpy(path, str1, strlen(str1));
+
+        char str2[] = "/statistics/tx_packets";
+        strncat(path, str2, strlen(str2));
 }
 
 
@@ -150,9 +163,7 @@ transmit_thread(void *conf)
 			nc->dstaddr = nc->start_dstaddr;
 		}
 
-
-		if (nc->mode == BASELINE_TEST_MODE)
-			usleep(10000);
+		usleep(nc->tx_interval);
 	}
 }
 
@@ -199,6 +210,7 @@ process_baseline_test(struct ndperf_config *nc)
 	struct fc_ptr *fcp = NULL;
 	struct in6_addr dstaddr = nc->dstaddr;
 	int ret;
+	long cnt1, cnt2;
 
 	const struct itimerval timer = {
 		.it_value.tv_sec = BASELINE_TEST_TIMER,
@@ -234,6 +246,15 @@ process_baseline_test(struct ndperf_config *nc)
 	for (;;) {
 		if (expired || caught_signal)
 			break;
+
+		cnt1 = get_packet_count(nc->tx_pkt_statics_path);
+
+		usleep(1000000);
+
+		cnt2 = get_packet_count(nc->tx_pkt_statics_path);
+
+		if (nc->threshold_pps < (cnt2 - cnt1))
+			printf("warning: %ld pps\n", cnt2 - cnt1);
 	}
 
 	increment_ipv6addr_plus_one(&dstaddr);
@@ -268,8 +289,9 @@ process_scaling_test(struct ndperf_config *nc)
 {
 	pthread_t rx_thread, tx_thread;
 	struct fc_ptr *fcp = NULL;
-	double start, end;
+	double start, end, duration;
 	int ret;
+	long cnt1, cnt2;
 
 	const struct itimerval timer = {
 		.it_value.tv_sec = SCALING_TEST_TIMER,
@@ -294,7 +316,7 @@ process_scaling_test(struct ndperf_config *nc)
 
 		// set timeout
 		setitimer(ITIMER_REAL, &timer, 0);
-		start = gettimeofday_sec();
+		start = get_timeofday_sec();
 
 		if (pthread_create(&rx_thread, NULL, (void *)receive_thread,
 		                  (void *)nc) != 0) {
@@ -308,6 +330,8 @@ process_scaling_test(struct ndperf_config *nc)
 			exit(1);
 		}
 
+		cnt1 = get_packet_count(nc->tx_pkt_statics_path);
+
 		while (1) {
 			if (expired || caught_signal)
 				break;
@@ -316,13 +340,14 @@ process_scaling_test(struct ndperf_config *nc)
 				break;
 		}
 
+		cnt2 = get_packet_count(nc->tx_pkt_statics_path);
+
 		// stop timeout
 		setitimer(ITIMER_REAL, &stop, 0);
 		expired = false;
-		end = gettimeofday_sec();
+		end = get_timeofday_sec();
 
-		if (nc->verbose)
-			print_flow_hash();
+		duration = end - start;
 
 		if ((ret = cleanup_thread(rx_thread)) < 0) {
 			fprintf(stderr, "Unable to cleanup rx thread\n");
@@ -336,16 +361,21 @@ process_scaling_test(struct ndperf_config *nc)
 			return ret;
 		}
 
+		if ((nc->threshold_pps * duration) < (cnt2 - cnt1))
+			printf("Warning: %ld pps. Threshold is %ld pps\n",
+				cnt2 - cnt1, nc->threshold_pps);
+
 		// failed case
 		if (!is_received_flow_hash()) {
 			printf("Test of %d neighbor isn't passed. It took %f seconds.\n",
-				test_index, end - start);
+				test_index, duration);
 			cleanup_flow_counter(fcp);
 			return -1;
 		}
 
-		printf("Test of %d neighbor is passed. It took %f seconds.\n",
-			test_index, end - start);
+		if (nc->verbose)
+			printf("Test of %d neighbor is passed. It took %f seconds. Current pps is %ld.\n",
+				test_index, end - start,  cnt2 - cnt1);
 
 		cleanup_flow_counter(fcp);
 		nc->dstaddr = nc->start_dstaddr;
@@ -397,6 +427,7 @@ usage(char *prgname)
 	fprintf(stderr, "\t-d: destination IPv6 address\n");
 	fprintf(stderr, "\t-p: destination IPv6 prefix length\n");
 	fprintf(stderr, "\t-n: neighbor number (default:1)\n");
+	fprintf(stderr, "\t-I: transmit interval(μs) (default:100μs)\n");
 	fprintf(stderr, "\t-v: verbose output\n");
 	fprintf(stderr, "\t-h: prints this help text\n");
 	fprintf(stderr, "\n");
@@ -417,9 +448,11 @@ init_ndperf_config(struct ndperf_config *nc)
 	nc->prefixlen = 0;
 	nc->verbose = false;
 	nc->threshold_pps = 0;
+	nc->tx_interval = -1;
 	memset(&nc->srcaddr, 0, sizeof(nc->srcaddr));
 	memset(&nc->dstaddr, 0, sizeof(nc->dstaddr));
 	memset(&nc->start_dstaddr, 0, sizeof(nc->start_dstaddr));
+	memset(&nc->tx_pkt_statics_path, 0, sizeof(nc->tx_pkt_statics_path));
 }
 
 int
@@ -436,7 +469,7 @@ main(int argc, char *argv[])
 
 	init_ndperf_config(&conf);
 
-	while ((option = getopt(argc, argv, "hSBvi:s:d:p:n:t:r:")) > 0) {
+	while ((option = getopt(argc, argv, "hSBvi:s:d:p:n:t:r:I:")) > 0) {
 		switch(option) {
 		case 'B':
 			conf.mode = BASELINE_TEST_MODE;
@@ -478,6 +511,9 @@ main(int argc, char *argv[])
 		case 'n':
 			conf.neighbor_num = atoi(optarg);
 			break;
+		case 'I':
+			conf.tx_interval = atoi(optarg);
+			break;
 		case 'v':
 			conf.verbose = true;
 			break;
@@ -509,13 +545,19 @@ main(int argc, char *argv[])
 	if (conf.neighbor_num < 1 || conf.neighbor_num >= MAX_NODE_NUMBER)
 		conf.neighbor_num = DEFAULT_NEIGHBOR_NUM;
 
+	if (conf.tx_interval < 0)
+		conf.tx_interval = DEFAULT_INTERVAL;
+
 	if ((link_speed = get_tx_link_speed(tx_if)) < 0) {
 		fprintf(stderr, "Unable to get tx link speed\n");
 		return -1;
 	}
 
 	conf.threshold_pps = get_threshold_pps_by_speed_link(link_speed);
-	printf("%ld\n", conf.threshold_pps);
+	if (conf.verbose)
+		printf("Threshold pps is %ld\n", conf.threshold_pps);
+
+	create_file_path(tx_if, strlen(tx_if), conf.tx_pkt_statics_path);
 
 	// setup tx
 	if ((conf.tx_sock = init_tx_socket(tx_if)) < 0) {
@@ -558,9 +600,11 @@ main(int argc, char *argv[])
 	} else if (conf.mode == SCALING_TEST_MODE) {
 		printf("Started scaling test...\n\n");
 		if (process_scaling_test(&conf) < 0) {
+			printf("%d neighbor test isn't passed.\n", conf.neighbor_num);
 			cleanup_process(&conf);
 			return -1;
 		}
+		printf("%d neighbor test is passed.\n", conf.neighbor_num);
 	}
 
 	cleanup_process(&conf);

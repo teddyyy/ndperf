@@ -27,6 +27,8 @@
 #define DEFAULT_NEIGHBOR_NUM	1
 #define MAX_NODE_NUMBER		8196
 
+#define DEFAULT_INTERVAL	100
+
 #define	ADDRSTRLEN		48
 #define HASH_TX			1
 #define HASH_RX			2
@@ -66,6 +68,9 @@ struct ndperf_config {
         int prefixlen;
 
 	long threshold_pps;
+	long tx_interval;
+
+	char tx_pkt_statics_path[256];
 };
 
 void increment_ipv6addr_plus_one(struct in6_addr *addr);
@@ -89,5 +94,6 @@ int delete_virtual_interface(int ifnum);
 int init_tx_socket(char *ifname);
 int init_rx_socket(int ifnum);
 int get_tx_link_speed(char *ifname);
+long get_packet_count(char *filepath);
 
 #endif
