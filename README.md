@@ -17,6 +17,25 @@ $ make
 
 Usage
 -------
+* Help
+```
+usage:	./ndperf
+	-B: Baseline test mode
+	-S: Scaling test mode
+
+	-i: interface(source)
+	-r: interface(destination)
+	-s: source IPv6 address
+	-d: destination IPv6 address
+	-p: destination IPv6 prefix length
+	-n: neighbor number (default:1)
+	-I: transmit interval(μs) (default:100μs)
+	-v: verbose output
+	-h: prints this help text
+
+```
+
+
 * Baseline test
 ```
 $ sudo ./ndperf -B -i enp0s3 -r enp0s8 -s 2001:2:0:0::1 -d 2001:2:0:1::1 -p 64
