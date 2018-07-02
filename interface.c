@@ -1,7 +1,7 @@
 #include "ndperf.h"
 #include "interface.h"
 
-static int
+int
 create_virtual_interface_name(char *ifname, int ifname_len, int num)
 {
 	int err;
@@ -179,102 +179,3 @@ delete_virtual_interface(int ifnum)
 	return 0;
 }
 
-int
-init_tx_socket(char *ifname)
-{
-        int sock;
-
-        if ((sock = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW)) < 0) {
-                perror("socket");
-                return -1;
-        }
-
-        // bind specific interface
-        setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, ifname, strlen(ifname) + 1);
-
-        return sock;
-}
-
-int
-init_rx_socket(int ifnum)
-{
-	int sock, err;
-	char vif[16] = "";
-
-	if ((sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IPV6))) < 0) {
-                perror("socket");
-                return -1;
-        }
-
-	for (int i = 1; i <= ifnum; i++) {
-		// construct interface name
-                if ((err = create_virtual_interface_name(vif, sizeof(vif), i)) < 0) {
-			fprintf(stderr, "Unable to create interface name\n");
-			return err;
-		}
-
-		// bind specific interface
-		setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, vif, strlen(vif) + 1);
-	}
-
-	return sock;
-}
-
-int
-get_tx_link_speed(char *ifname)
-{
-	int sock, ret;
-	struct ifreq ifr;
-	struct ethtool_cmd e;
-
-	sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock < 0) {
-		perror("socket");
-		return -1;
-	}
-
-	strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
-	ifr.ifr_data = (caddr_t)&e;
-
-	e.cmd = ETHTOOL_GSET;
-
-	ret = ioctl(sock, SIOCETHTOOL, &ifr);
-	if (ret < 0) {
-		perror("ioctl");
-		return ret;
-	}
-
-	switch (ethtool_cmd_speed(&e)) {
-		case SPEED_10: ret = 10; break;
-		case SPEED_100: ret = 100; break;
-		case SPEED_1000: ret = 1000; break;
-		case SPEED_2500: ret = 2500; break;
-		case SPEED_10000: ret = 10000; break;
-		default: fprintf(stderr, "Link Speed returned is %d\n", e.speed); ret = -1;
-	}
-
-	close(sock);
-
-	return ret;
-}
-
-long get_packet_count(char *filepath)
-{
-	int fd;
-	char buf[48];
-
-	fd = open(filepath, O_RDONLY);
-	if (fd == -1) {
-		perror("open");
-		return -1;
-	}
-
-	if (read(fd, buf, sizeof(buf)) == -1) {
-		perror("read");
-		return -1;
-	}
-
-	close(fd);
-
-	return atol(buf);
-}
