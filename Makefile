@@ -1,6 +1,6 @@
 CC = gcc
 
-OBJ = ndperf.o flow.o counter.o interface.o
+OBJ = ndperf.o flow.o counter.o interface.o socket.o util.o
 CFLAGS = -Wall -g
 INCPATH = /usr/include/libnl3/
 LDFLAGS = -lnl-3 -lnl-route-3 -lpthread

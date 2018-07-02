@@ -3,17 +3,6 @@
 static bool expired = false;
 static bool caught_signal = false;
 
-void
-increment_ipv6addr_plus_one(struct in6_addr *addr)
-{
-	int i;
-
-	// increase address by one
-	addr->s6_addr[15]++;
-	i = 15;
-	while (i > 0 && !addr->s6_addr[i--]) addr->s6_addr[i]++;
-}
-
 static double get_timeofday_sec()
 {
 	struct timeval tv;

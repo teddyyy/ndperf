@@ -91,9 +91,16 @@ void cleanup_flow_counter(struct fc_ptr *p);
 /* interface */
 int create_virtual_interface(struct in6_addr *addr, int prefixlen, int dstnum, char *pif);
 int delete_virtual_interface(int ifnum);
+int create_virtual_interface_name(char *ifname, int ifname_len, int num);
+
+/* socket */
 int init_tx_socket(char *ifname);
 int init_rx_socket(int ifnum);
+
+/* util */
 int get_tx_link_speed(char *ifname);
 long get_packet_count(char *filepath);
+void increment_ipv6addr_plus_one(struct in6_addr *addr);
+
 
 #endif
